@@ -163,7 +163,7 @@ extension GatewayDiscovery: NetServiceDelegate {
             id: id,
             name: name,
             host: hostname,
-            port: port > 0 ? port : 3000
+            port: port > 0 ? port : 18789
         )
         addOrUpdate(gateway: gateway)
         resolvingServices.removeAll { $0 === sender }

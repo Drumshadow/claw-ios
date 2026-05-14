@@ -120,7 +120,7 @@ struct QRScannerView: View {
                 uniquingKeysWith: { first, _ in first }
             )
             guard let host = params["host"], !host.isEmpty else { return nil }
-            let port = Int(params["port"] ?? "3000") ?? 3000
+            let port = Int(params["port"] ?? "18789") ?? 18789
             let isSecure = (params["scheme"] ?? "wss") != "ws"
             let name = params["name"] ?? host
             return GatewayConfig(name: name, host: host, port: port, isSecure: isSecure)
@@ -128,7 +128,7 @@ struct QRScannerView: View {
 
         if url.scheme == "ws" || url.scheme == "wss", let host = url.host {
             let isSecure = url.scheme == "wss"
-            let port = url.port ?? (isSecure ? 443 : 3000)
+            let port = url.port ?? (isSecure ? 443 : 18789)
             return GatewayConfig(name: host, host: host, port: port, isSecure: isSecure)
         }
 

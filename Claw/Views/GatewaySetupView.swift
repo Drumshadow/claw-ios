@@ -262,7 +262,7 @@ struct ManualGatewayEntryView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var host: String = ""
-    @State private var portText: String = "3000"
+    @State private var portText: String = "18789"
     @State private var name: String = ""
     @State private var isSecure: Bool = true
     @FocusState private var focusedField: Field?
@@ -314,7 +314,7 @@ struct ManualGatewayEntryView: View {
                 .listRowBackground(Color.clawCard)
 
                 Section {
-                    Text("Default port is **3000**. Disable TLS only for local networks without a certificate.")
+                    Text("Default port is **18789**. Disable TLS only for local networks without a certificate.")
                         .font(.footnote)
                         .foregroundStyle(Color.clawMuted)
                 }
@@ -336,7 +336,7 @@ struct ManualGatewayEntryView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Connect") {
                         let trimmedHost = host.trimmingCharacters(in: .whitespaces)
-                        let port = Int(portText) ?? 3000
+                        let port = Int(portText) ?? 18789
                         let displayName = name.trimmingCharacters(in: .whitespaces).isEmpty
                             ? trimmedHost
                             : name.trimmingCharacters(in: .whitespaces)
