@@ -25,6 +25,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: ai.claw.app
         SWIFT_VERSION: 5.9
         DEVELOPMENT_TEAM: UD4F4U8M59
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     entitlements:
       path: Claw/Claw.entitlements
       properties:
