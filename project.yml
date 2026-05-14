@@ -1,0 +1,102 @@
+name: Claw
+options:
+  bundleIdPrefix: ai.claw
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  ClawShared:
+    path: ClawShared
+  MarkdownUI:
+    url: https://github.com/gonzalezreal/swift-markdown-ui
+    from: "2.3.1"
+  Citadel:
+    url: https://github.com/orlandos-nl/Citadel
+    from: "0.7.0"
+targets:
+  Claw:
+    type: application
+    platform: iOS
+    sources: [Claw]
+    configFiles:
+      Debug: Claw/Config/Secrets.xcconfig
+      Release: Claw/Config/Secrets.xcconfig
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.claw.app
+        SWIFT_VERSION: 5.9
+        DEVELOPMENT_TEAM: UD4F4U8M59
+    entitlements:
+      path: Claw/Claw.entitlements
+      properties:
+        aps-environment: development
+    dependencies:
+      - target: ClawWidgets
+      - package: ClawShared
+        product: ClawShared
+      - package: MarkdownUI
+        product: MarkdownUI
+      - package: Citadel
+        product: Citadel
+      - sdk: BackgroundTasks.framework
+        embed: false
+    info:
+      path: Claw/Info.plist
+      properties:
+        CFBundleDisplayName: Claw
+        GITHUB_CLIENT_ID: "$(GITHUB_CLIENT_ID)"
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        NSBonjourServices:
+          - _openclaw._tcp.
+        NSCalendarsFullAccessUsageDescription: "Claw can share your calendar with the agent to answer scheduling questions."
+        NSContactsUsageDescription: "Claw can share your contacts with the agent to help you communicate."
+        NSLocalNetworkUsageDescription: "Claw needs local network access to discover OpenClaw gateways on your network."
+        # No ATS exceptions: all gateway traffic uses WSS, and all external API
+        # clients (GitHub / Datadog / AWS) hardcode HTTPS. Previously this
+        # block allowed insecure HTTP loads to *.ts.net, which is unused.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: false
+        NSMicrophoneUsageDescription: "Claw uses the microphone to transcribe voice messages."
+        NSRemindersFullAccessUsageDescription: "Claw can share your reminders with the agent to help you stay on track."
+        NSSpeechRecognitionUsageDescription: "Claw uses speech recognition to convert your voice to text."
+        UIBackgroundModes:
+          - remote-notification
+          - fetch
+        BGTaskSchedulerPermittedIdentifiers:
+          - ai.claw.health-check
+        UILaunchScreen:
+          UIColorName: ""
+          UIImageName: ""
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSSupportsLiveActivities: true
+        NSSupportsLiveActivitiesFrequentUpdates: true
+        CFBundleURLTypes:
+          - CFBundleURLName: ai.claw.oauth
+            CFBundleURLSchemes:
+              - claw
+
+  ClawWidgets:
+    type: app-extension
+    platform: iOS
+    sources: [ClawWidgets]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.claw.app.widgets
+        SWIFT_VERSION: 5.9
+        DEVELOPMENT_TEAM: UD4F4U8M59
+    dependencies:
+      - package: ClawShared
+        product: ClawShared
+    info:
+      path: ClawWidgets/Info.plist
+      properties:
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension

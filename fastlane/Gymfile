@@ -1,0 +1,5 @@
+scheme("Claw")
+configuration("Release")
+export_method("app-store")
+output_directory("./build")
+clean(true)
