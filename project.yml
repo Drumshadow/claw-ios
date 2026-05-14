@@ -53,6 +53,7 @@ targets:
         NSCalendarsFullAccessUsageDescription: "Claw can share your calendar with the agent to answer scheduling questions."
         NSContactsUsageDescription: "Claw can share your contacts with the agent to help you communicate."
         NSLocalNetworkUsageDescription: "Claw needs local network access to discover OpenClaw gateways on your network."
+        NSCameraUsageDescription: "Claw uses the camera to scan QR codes for quick gateway setup."
         # No ATS exceptions: all gateway traffic uses WSS, and all external API
         # clients (GitHub / Datadog / AWS) hardcode HTTPS. Previously this
         # block allowed insecure HTTP loads to *.ts.net, which is unused.

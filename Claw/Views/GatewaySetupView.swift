@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 
 // MARK: - GatewaySetupView
 
@@ -7,6 +8,7 @@ struct GatewaySetupView: View {
     @Environment(GatewayDiscovery.self) private var discovery
 
     @State private var showManualEntry = false
+    @State private var showQRScanner = false
     @State private var connectingConfig: GatewayConfig?
 
     var body: some View {
@@ -82,6 +84,14 @@ struct GatewaySetupView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
+                        showQRScanner = true
+                    } label: {
+                        Image(systemName: "qrcode.viewfinder")
+                    }
+                    .tint(Color.clawAccent)
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
                         showManualEntry = true
                     } label: {
                         Label("Add manually", systemImage: "plus")
@@ -92,6 +102,12 @@ struct GatewaySetupView: View {
             .sheet(isPresented: $showManualEntry) {
                 ManualGatewayEntryView { config in
                     showManualEntry = false
+                    connectTo(config)
+                }
+            }
+            .sheet(isPresented: $showQRScanner) {
+                QRScannerView { config in
+                    showQRScanner = false
                     connectTo(config)
                 }
             }
@@ -248,6 +264,7 @@ struct ManualGatewayEntryView: View {
     @State private var host: String = ""
     @State private var portText: String = "3000"
     @State private var name: String = ""
+    @State private var isSecure: Bool = true
     @FocusState private var focusedField: Field?
 
     private enum Field { case name, host, port }
@@ -278,6 +295,18 @@ struct ManualGatewayEntryView: View {
                     field(label: "Port", text: $portText, field: .port)
                         .keyboardType(.numberPad)
                         .submitLabel(.done)
+
+                    Toggle(isOn: $isSecure) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Use TLS (WSS)")
+                                .foregroundStyle(Color.clawTextStrong)
+                            Text(isSecure ? "wss://\(host.isEmpty ? "host" : host):\(portText)" : "ws://\(host.isEmpty ? "host" : host):\(portText)")
+                                .font(.caption)
+                                .foregroundStyle(Color.clawMuted)
+                                .animation(.none, value: isSecure)
+                        }
+                    }
+                    .tint(Color.clawAccent)
                 } header: {
                     Text("Gateway Details")
                         .foregroundStyle(Color.clawMuted)
@@ -285,7 +314,7 @@ struct ManualGatewayEntryView: View {
                 .listRowBackground(Color.clawCard)
 
                 Section {
-                    Text("Default port for OpenClaw gateway is **3000**.")
+                    Text("Default port is **3000**. Disable TLS only for local networks without a certificate.")
                         .font(.footnote)
                         .foregroundStyle(Color.clawMuted)
                 }
@@ -314,7 +343,8 @@ struct ManualGatewayEntryView: View {
                         let config = GatewayConfig(
                             name: displayName,
                             host: trimmedHost,
-                            port: port
+                            port: port,
+                            isSecure: isSecure
                         )
                         onConnect(config)
                     }

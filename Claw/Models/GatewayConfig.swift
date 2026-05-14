@@ -1,23 +1,25 @@
 import Foundation
 
-struct GatewayConfig: Codable, Identifiable, Hashable {
+struct GatewayConfig: Identifiable, Hashable {
     var id: UUID
     var name: String
     var host: String
     var port: Int
     var isDefault: Bool
+    var isSecure: Bool
 
-    init(id: UUID = UUID(), name: String, host: String, port: Int, isDefault: Bool = false) {
+    init(id: UUID = UUID(), name: String, host: String, port: Int, isDefault: Bool = false, isSecure: Bool = true) {
         self.id = id
         self.name = name
         self.host = host
         self.port = port
         self.isDefault = isDefault
+        self.isSecure = isSecure
     }
 
     var wsURL: URL? {
         var components = URLComponents()
-        components.scheme = "wss"
+        components.scheme = isSecure ? "wss" : "ws"
         components.host = host
         components.port = port
         components.path = "/ws"
@@ -25,9 +27,27 @@ struct GatewayConfig: Codable, Identifiable, Hashable {
     }
 
     var displayAddress: String {
-        "\(host):\(port)"
+        "\(isSecure ? "wss" : "ws")://\(host):\(port)"
     }
 
+}
+
+// MARK: - Codable with isSecure migration default
+
+extension GatewayConfig: Codable {
+    enum CodingKeys: String, CodingKey {
+        case id, name, host, port, isDefault, isSecure
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id        = try c.decode(UUID.self,   forKey: .id)
+        name      = try c.decode(String.self, forKey: .name)
+        host      = try c.decode(String.self, forKey: .host)
+        port      = try c.decode(Int.self,    forKey: .port)
+        isDefault = try c.decode(Bool.self,   forKey: .isDefault)
+        isSecure  = try c.decodeIfPresent(Bool.self, forKey: .isSecure) ?? true
+    }
 }
 
 // MARK: - Multi-gateway persistence helpers
