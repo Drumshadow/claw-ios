@@ -45,7 +45,7 @@ struct AgentLiveActivityWidget: Widget {
                     .foregroundStyle(.green)
                     .font(.caption)
             } compactTrailing: {
-                Text(shortModel(context.state.model) ?? context.state.sessionTitle.prefix(10))
+                Text(shortModel(context.state.model) ?? String(context.state.sessionTitle.prefix(10)))
                     .font(.caption2)
                     .foregroundStyle(.white)
                     .lineLimit(1)
