@@ -5,7 +5,7 @@ import PDFKit
 
 // MARK: - EmptyParams
 
-struct EmptyParams: Encodable {}
+private struct EmptyParams: Encodable {}
 
 // MARK: - ChatThreadView
 
