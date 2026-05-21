@@ -3,6 +3,11 @@ import ClawShared
 import SwiftUI
 import WidgetKit
 
+private func shortModel(_ m: String?) -> String? {
+    guard let m else { return nil }
+    return m.hasPrefix("claude-") ? String(m.dropFirst(7)) : m
+}
+
 struct AgentLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: AgentActivityAttributes.self) { context in
@@ -16,7 +21,7 @@ struct AgentLiveActivityWidget: Widget {
                         .foregroundStyle(.white)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    Text(context.attributes.sessionId.prefix(8))
+                    Text(shortModel(context.state.model) ?? String(context.attributes.sessionId.prefix(8)))
                         .font(.caption2.monospaced())
                         .foregroundStyle(.white.opacity(0.7))
                 }
@@ -40,7 +45,7 @@ struct AgentLiveActivityWidget: Widget {
                     .foregroundStyle(.green)
                     .font(.caption)
             } compactTrailing: {
-                Text(context.state.sessionTitle.prefix(10))
+                Text(shortModel(context.state.model) ?? context.state.sessionTitle.prefix(10))
                     .font(.caption2)
                     .foregroundStyle(.white)
                     .lineLimit(1)
@@ -63,6 +68,11 @@ struct AgentLockScreenView: View {
                 Text(state.sessionTitle)
                     .font(.headline)
                     .foregroundStyle(.white)
+                if let model = shortModel(state.model) {
+                    Text(model)
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.5))
+                }
                 if let tool = state.currentTool {
                     Text(tool)
                         .font(.caption)

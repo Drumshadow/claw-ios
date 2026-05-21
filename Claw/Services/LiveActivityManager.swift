@@ -7,14 +7,15 @@ final class LiveActivityManager {
     static let shared = LiveActivityManager()
     private var currentActivity: Activity<AgentActivityAttributes>?
 
-    func startActivity(sessionId: String, sessionTitle: String) {
+    func startActivity(sessionId: String, sessionTitle: String, model: String? = nil) {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         let attributes = AgentActivityAttributes(sessionId: sessionId)
         let state = AgentActivityAttributes.ContentState(
             sessionTitle: sessionTitle,
             currentTool: nil,
             status: "running",
-            startedAt: Date()
+            startedAt: Date(),
+            model: model
         )
         currentActivity = try? Activity.request(
             attributes: attributes,
@@ -25,11 +26,13 @@ final class LiveActivityManager {
 
     func updateActivity(currentTool: String?, status: String) {
         guard let activity = currentActivity else { return }
+        let existingModel = activity.content.state.model
         let state = AgentActivityAttributes.ContentState(
             sessionTitle: activity.content.state.sessionTitle,
             currentTool: currentTool,
             status: status,
-            startedAt: activity.content.state.startedAt
+            startedAt: activity.content.state.startedAt,
+            model: existingModel
         )
         Task {
             await activity.update(.init(state: state, staleDate: nil))

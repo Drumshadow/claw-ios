@@ -30,6 +30,9 @@ struct ClawMessage: Identifiable, Hashable, Codable {
     var toolInput: [String: JSONValue]? = nil
     var toolResult: String? = nil
 
+    // Thinking content (for extended thinking)
+    var thinkingContent: String? = nil
+
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }

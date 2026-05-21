@@ -7,12 +7,14 @@ public struct AgentActivityAttributes: ActivityAttributes {
         public var currentTool: String?
         public var status: String  // "running", "thinking", "done", "failed"
         public var startedAt: Date
+        public var model: String?
 
-        public init(sessionTitle: String, currentTool: String?, status: String, startedAt: Date) {
+        public init(sessionTitle: String, currentTool: String?, status: String, startedAt: Date, model: String? = nil) {
             self.sessionTitle = sessionTitle
             self.currentTool = currentTool
             self.status = status
             self.startedAt = startedAt
+            self.model = model
         }
     }
 

@@ -56,6 +56,10 @@ struct ChatThreadView: View {
         }
     }
 
+    private var hasActiveStream: Bool {
+        store.messages.contains { $0.id.hasPrefix("stream-") && $0.isStreaming }
+    }
+
     private var isSendDisabled: Bool {
         (composeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
          pendingAttachments.isEmpty) ||

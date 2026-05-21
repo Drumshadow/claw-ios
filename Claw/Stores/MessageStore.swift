@@ -422,8 +422,16 @@ final class MessageStore {
                 LiveActivityManager.shared.startActivity(sessionId: sessionKey, sessionTitle: title)
             }
 
+            let thinkingText: String?
+            if case .object(let msgObj) = msgVal {
+                thinkingText = extractThinkingText(from: msgObj)
+            } else {
+                thinkingText = nil
+            }
+
             if let idx = messages.firstIndex(where: { $0.id == streamId }) {
                 messages[idx].content = text
+                messages[idx].thinkingContent = thinkingText
             } else {
                 messages.append(ClawMessage(
                     id: streamId,
@@ -431,7 +439,8 @@ final class MessageStore {
                     role: .assistant,
                     content: text,
                     isStreaming: true,
-                    createdAt: Date()
+                    createdAt: Date(),
+                    thinkingContent: thinkingText
                 ))
             }
 
@@ -659,6 +668,19 @@ final class MessageStore {
             }
         }
         return nil
+    }
+
+    private func extractThinkingText(from obj: [String: JSONValue]) -> String? {
+        guard let cv = obj["content"], case .array(let blocks) = cv else { return nil }
+        let parts = blocks.compactMap { block -> String? in
+            guard case .object(let blk) = block,
+                  let typeVal = blk["type"], case .string(let kind) = typeVal,
+                  kind == "thinking",
+                  let textVal = blk["text"], case .string(let t) = textVal,
+                  !t.isEmpty else { return nil }
+            return t
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n")
     }
 }
 
