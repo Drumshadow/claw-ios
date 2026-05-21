@@ -28,8 +28,10 @@ struct ChatThreadView: View {
     @State private var showModelPicker = false
     @State private var sendButtonPressed = false
     @State private var voiceManager = VoiceInputManager()
+    @State private var slashSuggestions: [ClawSkill] = []
     @FocusState private var isComposeFocused: Bool
     @Environment(SessionStore.self) private var sessionStore
+    @Environment(SkillsStore.self) private var skillsStore
 
     init(
         session: ClawSession,
@@ -83,6 +85,18 @@ struct ChatThreadView: View {
         sessionForHeader.childSessionKeys
     }
 
+    private var filteredSlashSuggestions: [ClawSkill] {
+        guard composeText.hasPrefix("/") else { return [] }
+        let query = String(composeText.dropFirst()).lowercased()
+        let eligible = skillsStore.skills.filter { $0.enabled && $0.eligible }
+        if query.isEmpty { return Array(eligible.prefix(8)) }
+        return eligible.filter {
+            $0.skillKey.lowercased().hasPrefix(query) ||
+            $0.name.lowercased().hasPrefix(query) ||
+            $0.skillKey.lowercased().contains(query)
+        }.prefix(8).map { $0 }
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -99,6 +113,12 @@ struct ChatThreadView: View {
                 if isAgentActive {
                     activePill
                         .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .animation(.easeInOut(duration: 0.15), value: isAgentActive)
+                }
+                if !filteredSlashSuggestions.isEmpty {
+                    slashSuggestionsPanel
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .animation(.easeInOut(duration: 0.15), value: filteredSlashSuggestions.isEmpty)
                 }
                 composeBar
             }
@@ -296,13 +316,21 @@ struct ChatThreadView: View {
                     scrollToBottom(proxy: proxy, animated: false)
                 }
             }
+            .onChange(of: store.messages.last?.id) { _, _ in
+                if store.scrollAnchorAfterPrepend == nil, pendingScrollRestore == nil, !store.isLoadingMore {
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 100_000_000)
+                        scrollToBottom(proxy: proxy, animated: false)
+                    }
+                }
+            }
             .onChange(of: store.isLoading) { _, isLoading in
                 // Yield one run-loop turn after load so LazyVStack finishes layout
                 // before scrollToBottom fires (defaultScrollAnchor handles cold-open;
                 // this catches the edge case where messages arrive after first render).
                 if !isLoading, pendingScrollRestore == nil {
                     Task { @MainActor in
-                        try? await Task.sleep(nanoseconds: 50_000_000)
+                        try? await Task.sleep(nanoseconds: 150_000_000)
                         scrollToBottom(proxy: proxy, animated: false)
                     }
                 }
@@ -460,6 +488,60 @@ struct ChatThreadView: View {
             Divider().background(Color.clawBorder),
             alignment: .top
         )
+    }
+
+    // MARK: - Slash suggestions panel
+
+    private var slashSuggestionsPanel: some View {
+        VStack(spacing: 0) {
+            Divider().background(Color.clawBorder)
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 0) {
+                    ForEach(filteredSlashSuggestions) { skill in
+                        Button {
+                            composeText = "/\(skill.skillKey) "
+                            isComposeFocused = true
+                        } label: {
+                            HStack(spacing: 10) {
+                                if let emoji = skill.emoji {
+                                    Text(emoji)
+                                        .font(.system(size: 18))
+                                        .frame(width: 28)
+                                } else {
+                                    Image(systemName: "command")
+                                        .font(.system(size: 14))
+                                        .foregroundStyle(Color.clawAccent)
+                                        .frame(width: 28)
+                                }
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text("/\(skill.skillKey)")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundStyle(Color.clawText)
+                                    if !skill.description.isEmpty {
+                                        Text(skill.description)
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(Color.clawMuted)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                Spacer()
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        if skill.id != filteredSlashSuggestions.last?.id {
+                            Divider()
+                                .padding(.leading, 54)
+                                .background(Color.clawBorder)
+                        }
+                    }
+                }
+            }
+            .frame(maxHeight: 220)
+            .background(Color.clawBgAccent)
+        }
     }
 
     // MARK: - Compose bar
