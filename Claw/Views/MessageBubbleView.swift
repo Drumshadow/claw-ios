@@ -52,6 +52,9 @@ struct MessageBubbleView: View {
             if isUser, let names = message.attachmentNames, !names.isEmpty {
                 attachmentChips(names: names)
             }
+            if let thinking = message.thinkingContent, !thinking.isEmpty {
+                ReasoningBlockView(content: thinking)
+            }
             Group {
                 if isUser {
                     if !message.content.isEmpty {
@@ -67,8 +70,8 @@ struct MessageBubbleView: View {
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .background(bubbleBackground)
         .overlay(bubbleBorder)
     }
@@ -87,20 +90,20 @@ struct MessageBubbleView: View {
 
     @ViewBuilder
     private var bubbleBackground: some View {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
             .fill(isUser ? Color.clawAccentSubtle : Color.clawCard)
     }
 
     @ViewBuilder
     private var bubbleBorder: some View {
         if isFailed {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Color.clawDanger.opacity(0.7), lineWidth: 1)
         } else if message.isStreaming {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Color.clawAccent.opacity(0.5), lineWidth: 1)
         } else {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Color.clawBorder, lineWidth: 1)
         }
     }
@@ -205,7 +208,7 @@ private struct ToolCallRowView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "wrench.and.screwdriver")
                             .font(.system(size: 12))
-                            .foregroundStyle(Color.clawAccent)
+                            .foregroundStyle(Color.clawTeal)
                         Text(displayName)
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(Color.clawText)
@@ -232,7 +235,7 @@ private struct ToolCallRowView: View {
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.clawBgAccent)
+                    .fill(Color.clawBgElevated)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -316,5 +319,28 @@ private struct ToolCallRowView: View {
         if s.count <= maxChars { return s }
         let idx = s.index(s.startIndex, offsetBy: maxChars)
         return String(s[..<idx]) + "…"
+    }
+}
+
+// MARK: - ReasoningBlockView
+
+private struct ReasoningBlockView: View {
+    let content: String
+    @State private var expanded = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            Text(content)
+                .font(.system(size: 13))
+                .italic()
+                .foregroundStyle(Color.clawMuted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 4)
+        } label: {
+            Label("Reasoning", systemImage: "brain")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color.clawMuted)
+        }
+        .tint(Color.clawMuted)
     }
 }

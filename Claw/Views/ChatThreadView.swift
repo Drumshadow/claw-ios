@@ -3,6 +3,10 @@ import PhotosUI
 import UniformTypeIdentifiers
 import PDFKit
 
+// MARK: - EmptyParams
+
+struct EmptyParams: Encodable {}
+
 // MARK: - ChatThreadView
 
 struct ChatThreadView: View {
@@ -21,6 +25,8 @@ struct ChatThreadView: View {
     @State private var showFilePicker: Bool = false
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var showTimeline: Bool = false
+    @State private var showModelPicker = false
+    @State private var sendButtonPressed = false
     @State private var voiceManager = VoiceInputManager()
     @FocusState private var isComposeFocused: Bool
     @Environment(SessionStore.self) private var sessionStore
@@ -90,6 +96,10 @@ struct ChatThreadView: View {
                 if !childSessionKeys.isEmpty {
                     subagentsSection
                 }
+                if isAgentActive {
+                    activePill
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
                 composeBar
             }
             .background(Color.clawBg)
@@ -105,17 +115,24 @@ struct ChatThreadView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .toolbar {
-            if let statusText = agentStatus.displayText {
-                ToolbarItem(placement: .principal) {
+            ToolbarItem(placement: .principal) {
+                Button { showModelPicker = true } label: {
                     VStack(spacing: 1) {
                         Text(sessionForHeader.title)
                             .font(.headline)
                             .foregroundStyle(Color.clawTextStrong)
-                        Text(statusText)
-                            .font(.caption)
-                            .foregroundStyle(Color.clawMuted)
+                        if let model = sessionForHeader.model {
+                            Text(shortModelName(model))
+                                .font(.caption2)
+                                .foregroundStyle(Color.clawAccent)
+                        } else if isAgentActive, let statusText = agentStatus.displayText {
+                            Text(statusText)
+                                .font(.caption)
+                                .foregroundStyle(Color.clawMuted)
+                        }
                     }
                 }
+                .buttonStyle(.plain)
             }
             if isAgentActive {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -176,6 +193,9 @@ struct ChatThreadView: View {
                     }
             }
         }
+        .sheet(isPresented: $showModelPicker) {
+            ModelPickerSheet(client: client, currentModel: sessionForHeader.model)
+        }
         .onDisappear {
             Task { await store.unsubscribe() }
         }
@@ -232,7 +252,9 @@ struct ChatThreadView: View {
                     } else {
                         // Top sentinel — triggers `loadMore` when it appears.
                         topSentinel
-                        ForEach(store.messages) { message in
+                        ForEach(Array(store.messages.enumerated()), id: \.element.id) { index, message in
+                            let prevRole = index > 0 ? store.messages[index - 1].role : nil
+                            let sameSender = prevRole == message.role
                             MessageBubbleView(
                                 message: message,
                                 onRetry: message.sendFailed ? {
@@ -243,6 +265,12 @@ struct ChatThreadView: View {
                                 } : nil
                             )
                             .id(message.id)
+                            .padding(.top, sameSender ? 0 : 4)
+                        }
+                        if isAgentActive && !hasActiveStream {
+                            TypingIndicatorView()
+                                .id("typing-indicator")
+                                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .bottom)))
                         }
                         // Bottom padding + scroll anchor combined
                         Color.clear
@@ -399,6 +427,41 @@ struct ChatThreadView: View {
         onOpenChildSession?(target)
     }
 
+    // MARK: - Active pill
+
+    private var activePill: some View {
+        let currentTool = store.messages.last(where: { $0.role == .tool && $0.isStreaming })?.toolName
+        let statusText = currentTool.map { "Running: \($0)" } ?? (agentStatus.displayText ?? "Working…")
+
+        return HStack(spacing: 12) {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .scaleEffect(0.65)
+                    .tint(Color.clawAccent)
+                Text(statusText)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.clawText)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button(action: stopAgent) {
+                Image(systemName: "stop.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.clawDanger)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Stop agent")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .frame(height: 36)
+        .background(Color.clawBgAccent)
+        .overlay(
+            Divider().background(Color.clawBorder),
+            alignment: .top
+        )
+    }
+
     // MARK: - Compose bar
 
     private var composeBar: some View {
@@ -468,7 +531,7 @@ struct ChatThreadView: View {
                     .padding(.vertical, 10)
                     .background(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color.clawBgElevated)
+                            .fill(Color.clawBgHover)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                                     .strokeBorder(Color.clawBorderStrong, lineWidth: 1)
@@ -481,13 +544,22 @@ struct ChatThreadView: View {
                         if !isSendDisabled { sendMessage() }
                     }
 
-                Button(action: sendMessage) {
+                Button {
+                    sendButtonPressed = true
+                    Task {
+                        try? await Task.sleep(nanoseconds: 80_000_000)
+                        sendButtonPressed = false
+                        sendMessage()
+                    }
+                } label: {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.system(size: 30))
                         .foregroundStyle(isSendDisabled ? Color.clawMuted : Color.clawAccent)
                 }
                 .disabled(isSendDisabled)
-                .animation(.easeInOut(duration: 0.15), value: isSendDisabled)
+                .buttonStyle(.plain)
+                .scaleEffect(sendButtonPressed ? 0.92 : 1.0)
+                .animation(.easeInOut(duration: 0.1), value: sendButtonPressed)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -661,6 +733,10 @@ struct ChatThreadView: View {
 
     // MARK: - Formatting helpers
 
+    private func shortModelName(_ m: String) -> String {
+        m.hasPrefix("claude-") ? String(m.dropFirst(7)) : m
+    }
+
     private func formatCost(_ value: Double) -> String {
         let formatter = value < 1 ? Self.costFormatterPrecise : Self.costFormatterStandard
         return formatter.string(from: NSNumber(value: value)) ?? String(format: "$%.4f", value)
@@ -736,5 +812,183 @@ private struct SubagentRowView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - TypingIndicatorView
+
+private struct TypingIndicatorView: View {
+    @State private var phase: Double = 0
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 0) {
+            HStack(spacing: 5) {
+                ForEach(0..<3) { i in
+                    Circle()
+                        .fill(Color.clawMuted)
+                        .frame(width: 7, height: 7)
+                        .opacity(0.3 + 0.7 * max(0, sin(phase - Double(i) * 0.6)))
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.clawCard)
+                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(Color.clawBorder, lineWidth: 1))
+            )
+            Spacer(minLength: 48)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 2)
+        .onAppear {
+            withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
+                phase = .pi * 2
+            }
+        }
+    }
+}
+
+// MARK: - ModelPickerSheet
+
+struct ModelPickerSheet: View {
+    let client: GatewayClient
+    let currentModel: String?
+    @State private var availableModels: [String] = []
+    @State private var selectedModel: String = ""
+    @State private var thinkingBudget: String = UserDefaults.standard.string(forKey: "claw.thinkingBudget") ?? "medium"
+    @State private var isLoading = true
+    @Environment(\.dismiss) private var dismiss
+
+    private let fallbackModels = ["claude-opus-4-7", "claude-opus-4-5", "claude-sonnet-4-6", "claude-sonnet-4-5", "claude-haiku-4-5"]
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    if isLoading {
+                        ProgressView().frame(maxWidth: .infinity)
+                    } else {
+                        ForEach(availableModels, id: \.self) { model in
+                            Button {
+                                selectedModel = model
+                                Task { await updateModel(model) }
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(model)
+                                            .font(.system(size: 14))
+                                            .foregroundStyle(Color.clawText)
+                                        Text(modelDescription(model))
+                                            .font(.caption2)
+                                            .foregroundStyle(Color.clawMuted)
+                                    }
+                                    Spacer()
+                                    if model == selectedModel {
+                                        Image(systemName: "checkmark")
+                                            .foregroundStyle(Color.clawAccent)
+                                            .font(.system(size: 13, weight: .semibold))
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .listRowBackground(Color.clawCard)
+                        }
+                    }
+                } header: {
+                    Text("Model").foregroundStyle(Color.clawMuted).font(.caption)
+                }
+
+                Section {
+                    ForEach(["low", "medium", "high"], id: \.self) { level in
+                        Button {
+                            thinkingBudget = level
+                            UserDefaults.standard.set(level, forKey: "claw.thinkingBudget")
+                            Task { await updateThinkingBudget(level) }
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(level.capitalized)
+                                        .font(.system(size: 14))
+                                        .foregroundStyle(Color.clawText)
+                                    Text(budgetDescription(level))
+                                        .font(.caption2)
+                                        .foregroundStyle(Color.clawMuted)
+                                }
+                                Spacer()
+                                if level == thinkingBudget {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(Color.clawAccent)
+                                        .font(.system(size: 13, weight: .semibold))
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .listRowBackground(Color.clawCard)
+                    }
+                } header: {
+                    Text("Thinking Budget").foregroundStyle(Color.clawMuted).font(.caption)
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color.clawBg)
+            .navigationTitle("Session Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.clawBgAccent, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { dismiss() }
+                        .tint(Color.clawAccent)
+                }
+            }
+            .task { await loadConfig() }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private func loadConfig() async {
+        isLoading = true
+        selectedModel = currentModel ?? ""
+        if let payload = try? await client.send(method: GatewayMethod.configGet, params: EmptyParams()) {
+            if let modelsVal = payload["availableModels"] ?? payload["models"],
+               case .array(let arr) = modelsVal {
+                availableModels = arr.compactMap { if case .string(let s) = $0 { return s } else { return nil } }
+            }
+            if let modelVal = payload["model"], case .string(let m) = modelVal, !m.isEmpty {
+                selectedModel = m
+            }
+        }
+        if availableModels.isEmpty { availableModels = fallbackModels }
+        if selectedModel.isEmpty, let first = availableModels.first { selectedModel = first }
+        isLoading = false
+    }
+
+    private func updateModel(_ model: String) async {
+        struct ModelPatch: Encodable { let model: String }
+        _ = try? await client.send(method: GatewayMethod.configPatch, params: ModelPatch(model: model))
+    }
+
+    private func updateThinkingBudget(_ budget: String) async {
+        struct BudgetPatch: Encodable { let thinkingBudget: String }
+        _ = try? await client.send(method: GatewayMethod.configPatch, params: BudgetPatch(thinkingBudget: budget))
+    }
+
+    private func modelDescription(_ model: String) -> String {
+        if model.contains("opus") { return "Most capable" }
+        if model.contains("sonnet") { return "Balanced" }
+        if model.contains("haiku") { return "Fast & efficient" }
+        return ""
+    }
+
+    private func budgetDescription(_ level: String) -> String {
+        switch level {
+        case "low": return "~1k tokens — quick answers"
+        case "medium": return "~8k tokens — balanced reasoning"
+        case "high": return "~32k tokens — deep analysis"
+        default: return ""
+        }
     }
 }
