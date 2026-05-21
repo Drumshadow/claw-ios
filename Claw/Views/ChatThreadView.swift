@@ -187,6 +187,7 @@ struct ChatThreadView: View {
         }
         .task {
             await store.subscribe()
+            store.updateSessionModel(sessionForHeader.model)
             do {
                 try await store.load()
             } catch {
@@ -218,6 +219,9 @@ struct ChatThreadView: View {
         }
         .onDisappear {
             Task { await store.unsubscribe() }
+        }
+        .onChange(of: sessionForHeader.model) { _, newModel in
+            store.updateSessionModel(newModel)
         }
     }
 

@@ -59,7 +59,7 @@ final class MessageStore {
     private let client: GatewayClient
     let sessionKey: String
     private let sessionTitle: String
-    private let sessionModel: String?
+    private(set) var sessionModel: String?
     nonisolated(unsafe) private var eventTask: Task<Void, Never>?
     nonisolated(unsafe) private var silentReloadTask: Task<Void, Never>?
     // Tracks run IDs we've started Live Activities for. Capped to prevent
@@ -156,6 +156,11 @@ final class MessageStore {
     /// Acknowledge that the view has consumed the scroll anchor and restored position.
     func clearScrollAnchor() {
         scrollAnchorAfterPrepend = nil
+    }
+
+    func updateSessionModel(_ model: String?) {
+        guard model != sessionModel else { return }
+        sessionModel = model
     }
 
     // MARK: - Abort
@@ -419,6 +424,11 @@ final class MessageStore {
             guard let msgVal = payload["message"],
                   let text = extractText(from: msgVal),
                   !text.isEmpty else { return }
+
+            // Keep sessionModel up-to-date if the gateway includes it in the delta payload
+            if let modelVal = payload["model"], case .string(let m) = modelVal, !m.isEmpty {
+                sessionModel = m
+            }
 
             if !seenRunIds.contains(runId) {
                 markRunIdSeen(runId)
