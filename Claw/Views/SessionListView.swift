@@ -162,7 +162,7 @@ struct SessionListView: View {
             RemoteOpsDashboardView()
         }
         .sheet(isPresented: $showNewSession) {
-            NewSessionView()
+            NewSessionView(onCreated: { key in Task { @MainActor in try? await Task.sleep(nanoseconds: 400_000_000); if let session = store.sessions.first(where: { $0.id == key }) { onSelect(session) } } })
                 .environment(store)
         }
         .confirmationDialog(
