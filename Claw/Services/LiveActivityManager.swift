@@ -39,6 +39,20 @@ final class LiveActivityManager {
         }
     }
 
+    func updateModel(_ model: String?) {
+        guard let activity = currentActivity, let model else { return }
+        let state = AgentActivityAttributes.ContentState(
+            sessionTitle: activity.content.state.sessionTitle,
+            currentTool: activity.content.state.currentTool,
+            status: activity.content.state.status,
+            startedAt: activity.content.state.startedAt,
+            model: model
+        )
+        Task {
+            await activity.update(.init(state: state, staleDate: nil))
+        }
+    }
+
     func endActivity() {
         guard let activity = currentActivity else { return }
         Task {

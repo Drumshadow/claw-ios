@@ -161,6 +161,7 @@ final class MessageStore {
     func updateSessionModel(_ model: String?) {
         guard model != sessionModel else { return }
         sessionModel = model
+        LiveActivityManager.shared.updateModel(model)
     }
 
     // MARK: - Abort
