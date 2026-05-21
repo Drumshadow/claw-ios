@@ -434,7 +434,7 @@ final class MessageStore {
             if !seenRunIds.contains(runId) {
                 markRunIdSeen(runId)
                 let displayTitle = sessionTitle.isEmpty ? String(sessionKey.prefix(12)) : sessionTitle
-                LiveActivityManager.shared.startActivity(sessionId: sessionKey, sessionTitle: displayTitle, model: sessionModel)
+                LiveActivityManager.shared.startOrUpdateActivity(sessionId: sessionKey, sessionTitle: displayTitle, model: sessionModel)
             }
 
             let thinkingText: String?
@@ -465,7 +465,7 @@ final class MessageStore {
             if let idx = messages.firstIndex(where: { $0.id == streamId }) {
                 messages[idx].isStreaming = false
             }
-            LiveActivityManager.shared.endActivity()
+            LiveActivityManager.shared.setIdle()
             if UIApplication.shared.applicationState != .active {
                 let content = UNMutableNotificationContent()
                 content.title = sessionTitle.isEmpty ? "OpenClaw" : sessionTitle
@@ -487,7 +487,7 @@ final class MessageStore {
 
         case "aborted", "error":
             messages.removeAll { $0.id == streamId }
-            LiveActivityManager.shared.endActivity()
+            LiveActivityManager.shared.setIdle()
             // Clear any tool bubbles from this run that never received an "end" event
             messages.indices.forEach { i in
                 if messages[i].role == .tool && messages[i].isStreaming && messages[i].id.hasPrefix("tool-\(runId)-") {
@@ -530,7 +530,7 @@ final class MessageStore {
             if !seenRunIds.contains(runId) {
                 markRunIdSeen(runId)
                 let displayTitle = sessionTitle.isEmpty ? String(sessionKey.prefix(12)) : sessionTitle
-                LiveActivityManager.shared.startActivity(sessionId: sessionKey, sessionTitle: displayTitle, model: sessionModel)
+                LiveActivityManager.shared.startOrUpdateActivity(sessionId: sessionKey, sessionTitle: displayTitle, model: sessionModel)
             }
             LiveActivityManager.shared.updateActivity(currentTool: toolName, status: "running")
 

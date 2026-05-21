@@ -188,6 +188,12 @@ struct ChatThreadView: View {
         .task {
             await store.subscribe()
             store.updateSessionModel(sessionForHeader.model)
+            // Start persistent Live Activity so model name shows on island immediately
+            LiveActivityManager.shared.startPersistentActivity(
+                sessionId: session.id,
+                sessionTitle: session.title,
+                model: sessionForHeader.model
+            )
             do {
                 try await store.load()
             } catch {
@@ -219,6 +225,7 @@ struct ChatThreadView: View {
         }
         .onDisappear {
             Task { await store.unsubscribe() }
+            LiveActivityManager.shared.terminateActivity()
         }
         .onChange(of: sessionForHeader.model) { _, newModel in
             store.updateSessionModel(newModel)

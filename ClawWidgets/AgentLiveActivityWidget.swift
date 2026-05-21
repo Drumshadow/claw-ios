@@ -11,14 +11,24 @@ private func shortModel(_ m: String?) -> String? {
 struct AgentLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: AgentActivityAttributes.self) { context in
-            // Lock Screen / Notification banner
             AgentLockScreenView(state: context.state)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Label(context.state.currentTool ?? "Running…", systemImage: "cpu")
-                        .font(.caption2)
-                        .foregroundStyle(.white)
+                    HStack(spacing: 6) {
+                        if context.state.status == "idle" {
+                            Circle()
+                                .fill(.green.opacity(0.7))
+                                .frame(width: 8, height: 8)
+                        } else {
+                            ProgressView()
+                                .scaleEffect(0.6)
+                                .tint(.green)
+                        }
+                        Text(context.state.status == "idle" ? "Connected" : (context.state.currentTool ?? "Running…"))
+                            .font(.caption2)
+                            .foregroundStyle(.white)
+                    }
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     Text(shortModel(context.state.model) ?? String(context.attributes.sessionId.prefix(8)))
@@ -27,31 +37,43 @@ struct AgentLiveActivityWidget: Widget {
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     HStack {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                            .tint(.green)
                         Text(context.state.sessionTitle)
                             .font(.caption)
                             .foregroundStyle(.white)
                             .lineLimit(1)
                         Spacer()
-                        Text(context.state.status.capitalized)
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.6))
+                        if let model = shortModel(context.state.model) {
+                            Text(model)
+                                .font(.caption2)
+                                .foregroundStyle(.green.opacity(0.8))
+                        }
                     }
                 }
             } compactLeading: {
-                Image(systemName: "cpu")
-                    .foregroundStyle(.green)
-                    .font(.caption)
+                if context.state.status == "idle" {
+                    Circle()
+                        .fill(.green.opacity(0.7))
+                        .frame(width: 8, height: 8)
+                } else {
+                    Image(systemName: "cpu")
+                        .foregroundStyle(.green)
+                        .font(.caption2)
+                }
             } compactTrailing: {
                 Text(shortModel(context.state.model) ?? String(context.state.sessionTitle.prefix(10)))
                     .font(.caption2)
                     .foregroundStyle(.white)
                     .lineLimit(1)
             } minimal: {
-                Image(systemName: "cpu")
-                    .foregroundStyle(.green)
+                if context.state.status == "idle" {
+                    Circle()
+                        .fill(.green.opacity(0.7))
+                        .frame(width: 6, height: 6)
+                } else {
+                    Image(systemName: "cpu")
+                        .foregroundStyle(.green)
+                        .font(.system(size: 9))
+                }
             }
         }
     }
@@ -62,8 +84,14 @@ struct AgentLockScreenView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            ProgressView()
-                .tint(.green)
+            if state.status == "idle" {
+                Circle()
+                    .fill(.green.opacity(0.7))
+                    .frame(width: 10, height: 10)
+            } else {
+                ProgressView()
+                    .tint(.green)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text(state.sessionTitle)
                     .font(.headline)
@@ -73,7 +101,7 @@ struct AgentLockScreenView: View {
                         .font(.caption2)
                         .foregroundStyle(.white.opacity(0.5))
                 }
-                if let tool = state.currentTool {
+                if state.status != "idle", let tool = state.currentTool {
                     Text(tool)
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.7))
@@ -81,7 +109,7 @@ struct AgentLockScreenView: View {
                 }
             }
             Spacer()
-            Text(state.status.capitalized)
+            Text(state.status == "idle" ? "Connected" : state.status.capitalized)
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.5))
         }
