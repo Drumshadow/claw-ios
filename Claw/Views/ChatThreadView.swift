@@ -39,7 +39,7 @@ struct ChatThreadView: View {
         self.session = session
         self.client = client
         self.onOpenChildSession = onOpenChildSession
-        _store = State(initialValue: MessageStore(client: client, sessionKey: session.id))
+        _store = State(initialValue: MessageStore(client: client, sessionKey: session.id, sessionTitle: session.title, sessionModel: session.model))
     }
 
     // MARK: - Computed

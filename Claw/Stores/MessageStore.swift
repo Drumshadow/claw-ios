@@ -58,6 +58,8 @@ final class MessageStore {
 
     private let client: GatewayClient
     let sessionKey: String
+    private let sessionTitle: String
+    private let sessionModel: String?
     nonisolated(unsafe) private var eventTask: Task<Void, Never>?
     nonisolated(unsafe) private var silentReloadTask: Task<Void, Never>?
     // Tracks run IDs we've started Live Activities for. Capped to prevent
@@ -71,9 +73,11 @@ final class MessageStore {
 
     // MARK: - Init
 
-    init(client: GatewayClient, sessionKey: String) {
+    init(client: GatewayClient, sessionKey: String, sessionTitle: String = "", sessionModel: String? = nil) {
         self.client = client
         self.sessionKey = sessionKey
+        self.sessionTitle = sessionTitle
+        self.sessionModel = sessionModel
         let cached = loadMessageCache()
         if !cached.isEmpty { messages = cached }
         startEventSubscription()
@@ -418,8 +422,8 @@ final class MessageStore {
 
             if !seenRunIds.contains(runId) {
                 markRunIdSeen(runId)
-                let title = String(sessionKey.prefix(12))
-                LiveActivityManager.shared.startActivity(sessionId: sessionKey, sessionTitle: title)
+                let displayTitle = sessionTitle.isEmpty ? String(sessionKey.prefix(12)) : sessionTitle
+                LiveActivityManager.shared.startActivity(sessionId: sessionKey, sessionTitle: displayTitle, model: sessionModel)
             }
 
             let thinkingText: String?
@@ -453,8 +457,8 @@ final class MessageStore {
             LiveActivityManager.shared.endActivity()
             if UIApplication.shared.applicationState != .active {
                 let content = UNMutableNotificationContent()
-                content.title = "Agent finished"
-                content.body = "Response ready"
+                content.title = sessionTitle.isEmpty ? "OpenClaw" : sessionTitle
+                content.body = "Agent has responded"
                 content.sound = .default
                 let request = UNNotificationRequest(
                     identifier: "agent-done-\(runId)",
@@ -463,10 +467,22 @@ final class MessageStore {
                 )
                 UNUserNotificationCenter.current().add(request)
             }
+            // Clear any tool bubbles from this run that never received an "end" event
+            messages.indices.forEach { i in
+                if messages[i].role == .tool && messages[i].isStreaming && messages[i].id.hasPrefix("tool-\(runId)-") {
+                    messages[i].isStreaming = false
+                }
+            }
 
         case "aborted", "error":
             messages.removeAll { $0.id == streamId }
             LiveActivityManager.shared.endActivity()
+            // Clear any tool bubbles from this run that never received an "end" event
+            messages.indices.forEach { i in
+                if messages[i].role == .tool && messages[i].isStreaming && messages[i].id.hasPrefix("tool-\(runId)-") {
+                    messages[i].isStreaming = false
+                }
+            }
 
         default:
             break
@@ -502,8 +518,8 @@ final class MessageStore {
             // Start Live Activity if first tool in this run
             if !seenRunIds.contains(runId) {
                 markRunIdSeen(runId)
-                let title = String(sessionKey.prefix(12))
-                LiveActivityManager.shared.startActivity(sessionId: sessionKey, sessionTitle: title)
+                let displayTitle = sessionTitle.isEmpty ? String(sessionKey.prefix(12)) : sessionTitle
+                LiveActivityManager.shared.startActivity(sessionId: sessionKey, sessionTitle: displayTitle, model: sessionModel)
             }
             LiveActivityManager.shared.updateActivity(currentTool: toolName, status: "running")
 
