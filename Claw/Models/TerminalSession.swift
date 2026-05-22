@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - TerminalSessionStatus
 
-enum TerminalSessionStatus: String, Codable, Equatable {
+enum TerminalSessionStatus: String, Codable, Equatable, Hashable {
     case active     // live streaming output
     case idle       // connected, no recent output
     case ended      // process exited; history is available
@@ -24,7 +24,7 @@ enum TerminalSessionStatus: String, Codable, Equatable {
 
 /// Represents a terminal session managed by the gateway.
 /// Maps to the `terminal.sessions.list` and `terminal.output` gateway contracts.
-struct TerminalSession: Identifiable, Codable, Equatable {
+struct TerminalSession: Identifiable, Codable, Equatable, Hashable {
     let id: String
     var title: String
     var nodeId: String?         // runner node hosting this session
