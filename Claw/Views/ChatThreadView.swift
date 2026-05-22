@@ -7,6 +7,14 @@ import PDFKit
 
 private struct EmptyParams: Encodable {}
 
+private struct ChatBottomOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = .greatestFiniteMagnitude
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 // MARK: - ChatThreadView
 
 struct ChatThreadView: View {
@@ -17,6 +25,8 @@ struct ChatThreadView: View {
     @State private var store: MessageStore
     @State private var composeText: String = ""
     @State private var pendingScrollRestore: String? = nil
+    @State private var isNearBottom: Bool = true
+    @State private var forceScrollAfterSend: Bool = false
     @State private var showStoppedToast: Bool = false
     @State private var subagentsExpanded: Bool = false
     @State private var pendingAttachments: [AttachmentItem] = []
@@ -393,90 +403,109 @@ struct ChatThreadView: View {
     // MARK: - Message list
 
     private var messageList: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    if store.isLoading && store.messages.isEmpty {
-                        ProgressView("Loading messages…")
-                            .tint(Color.clawAccent)
-                            .foregroundStyle(Color.clawMuted)
-                            .padding(.top, 40)
-                    } else if store.messages.isEmpty && !store.isLoading {
-                        emptyMessagesView
-                    } else {
-                        // Top sentinel — triggers `loadMore` when it appears.
-                        topSentinel
-                        ForEach(Array(store.messages.enumerated()), id: \.element.id) { index, message in
-                            let prevRole = index > 0 ? store.messages[index - 1].role : nil
-                            let sameSender = prevRole == message.role
-                            MessageBubbleView(
-                                message: message,
-                                onRetry: message.sendFailed ? {
-                                    Task { await store.retrySend(messageId: message.id) }
-                                } : nil,
-                                onDiscard: message.sendFailed ? {
-                                    store.discardFailed(messageId: message.id)
-                                } : nil
-                            )
-                            .id(message.id)
-                            .padding(.top, sameSender ? 0 : 4)
+        GeometryReader { viewport in
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        if store.isLoading && store.messages.isEmpty {
+                            ProgressView("Loading messages…")
+                                .tint(Color.clawAccent)
+                                .foregroundStyle(Color.clawMuted)
+                                .padding(.top, 40)
+                        } else if store.messages.isEmpty && !store.isLoading {
+                            emptyMessagesView
+                        } else {
+                            // Top sentinel — triggers `loadMore` when it appears.
+                            topSentinel
+                            ForEach(Array(store.messages.enumerated()), id: \.element.id) { index, message in
+                                let prevRole = index > 0 ? store.messages[index - 1].role : nil
+                                let sameSender = prevRole == message.role
+                                MessageBubbleView(
+                                    message: message,
+                                    onRetry: message.sendFailed ? {
+                                        Task { await store.retrySend(messageId: message.id) }
+                                    } : nil,
+                                    onDiscard: message.sendFailed ? {
+                                        store.discardFailed(messageId: message.id)
+                                    } : nil
+                                )
+                                .id(message.id)
+                                .padding(.top, sameSender ? 0 : 4)
+                            }
+                            if isAgentActive && !hasActiveStream {
+                                TypingIndicatorView()
+                                    .id("typing-indicator")
+                                    .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .bottom)))
+                            }
+                            // Bottom padding + scroll anchor combined
+                            Color.clear
+                                .frame(height: 8)
+                                .id("bottom-anchor")
+                                .background(
+                                    GeometryReader { bottomProxy in
+                                        Color.clear.preference(
+                                            key: ChatBottomOffsetPreferenceKey.self,
+                                            value: bottomProxy.frame(in: .named("chat-scroll")).minY
+                                        )
+                                    }
+                                )
                         }
-                        if isAgentActive && !hasActiveStream {
-                            TypingIndicatorView()
-                                .id("typing-indicator")
-                                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .bottom)))
-                        }
-                        // Bottom padding + scroll anchor combined
-                        Color.clear
-                            .frame(height: 8)
-                            .id("bottom-anchor")
+                    }
+                    .padding(.top, 8)
+                }
+                .coordinateSpace(name: "chat-scroll")
+                .onPreferenceChange(ChatBottomOffsetPreferenceKey.self) { bottomOffset in
+                    // Native chat behavior: only follow new content while the user is
+                    // already near the tail. If they scroll up to read history, don't
+                    // yank them back down on every stream delta.
+                    isNearBottom = bottomOffset <= viewport.size.height + 160
+                }
+                .defaultScrollAnchor(.bottom)
+                .onChange(of: store.messages.count) { oldCount, newCount in
+                    // Don't auto-scroll-to-bottom when older messages were prepended;
+                    // the scrollAnchorAfterPrepend handler below restores position.
+                    let isPrepending = store.scrollAnchorAfterPrepend != nil ||
+                                       store.isLoadingMore ||
+                                       pendingScrollRestore != nil
+                    if !isPrepending, newCount > oldCount, isNearBottom || forceScrollAfterSend {
+                        scrollToBottom(proxy: proxy, animated: true)
+                        forceScrollAfterSend = false
                     }
                 }
-                .padding(.top, 8)
-            }
-            .defaultScrollAnchor(.bottom)
-            .onChange(of: store.messages.count) { oldCount, newCount in
-                // Don't auto-scroll-to-bottom when older messages were prepended;
-                // the scrollAnchorAfterPrepend handler below restores position.
-                let isPrepending = store.scrollAnchorAfterPrepend != nil ||
-                                   store.isLoadingMore ||
-                                   pendingScrollRestore != nil
-                if !isPrepending, newCount > oldCount {
-                    scrollToBottom(proxy: proxy, animated: true)
+                .onChange(of: store.messages.last?.content) { _, _ in
+                    if store.scrollAnchorAfterPrepend == nil, pendingScrollRestore == nil, !isComposeFocused, isNearBottom {
+                        scrollToBottom(proxy: proxy, animated: false)
+                    }
                 }
-            }
-            .onChange(of: store.messages.last?.content) { _, _ in
-                if store.scrollAnchorAfterPrepend == nil, pendingScrollRestore == nil, !isComposeFocused {
-                    scrollToBottom(proxy: proxy, animated: false)
+                .onChange(of: store.messages.last?.id) { _, _ in
+                    if store.scrollAnchorAfterPrepend == nil, pendingScrollRestore == nil, !store.isLoadingMore, isNearBottom || forceScrollAfterSend {
+                        Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 100_000_000)
+                            scrollToBottom(proxy: proxy, animated: false)
+                            forceScrollAfterSend = false
+                        }
+                    }
                 }
-            }
-            .onChange(of: store.messages.last?.id) { _, _ in
-                if store.scrollAnchorAfterPrepend == nil, pendingScrollRestore == nil, !store.isLoadingMore {
+                .onChange(of: store.isLoading) { _, isLoading in
+                    // Yield one run-loop turn after load so LazyVStack finishes layout
+                    // before scrollToBottom fires (defaultScrollAnchor handles cold-open;
+                    // this catches the edge case where messages arrive after first render).
+                    if !isLoading, pendingScrollRestore == nil, isNearBottom {
+                        Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 150_000_000)
+                            scrollToBottom(proxy: proxy, animated: false)
+                        }
+                    }
+                }
+                .onChange(of: store.scrollAnchorAfterPrepend) { _, anchorId in
+                    guard let anchorId else { return }
+                    pendingScrollRestore = anchorId
+                    proxy.scrollTo(anchorId, anchor: .top)
+                    store.clearScrollAnchor()
                     Task { @MainActor in
                         try? await Task.sleep(nanoseconds: 100_000_000)
-                        scrollToBottom(proxy: proxy, animated: false)
+                        pendingScrollRestore = nil
                     }
-                }
-            }
-            .onChange(of: store.isLoading) { _, isLoading in
-                // Yield one run-loop turn after load so LazyVStack finishes layout
-                // before scrollToBottom fires (defaultScrollAnchor handles cold-open;
-                // this catches the edge case where messages arrive after first render).
-                if !isLoading, pendingScrollRestore == nil {
-                    Task { @MainActor in
-                        try? await Task.sleep(nanoseconds: 150_000_000)
-                        scrollToBottom(proxy: proxy, animated: false)
-                    }
-                }
-            }
-            .onChange(of: store.scrollAnchorAfterPrepend) { _, anchorId in
-                guard let anchorId else { return }
-                pendingScrollRestore = anchorId
-                proxy.scrollTo(anchorId, anchor: .top)
-                store.clearScrollAnchor()
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 100_000_000)
-                    pendingScrollRestore = nil
                 }
             }
         }
@@ -868,6 +897,7 @@ struct ChatThreadView: View {
         composeText = ""
         pendingAttachments = []
         selectedPhotoItems = []
+        forceScrollAfterSend = true
         Task {
             try? await store.send(text: text, attachments: attachments)
         }
@@ -934,6 +964,7 @@ struct ChatThreadView: View {
     private func sendExplainPrompt() {
         let prompt = "In 2-3 sentences, summarize what you just did, what succeeded, and what failed if anything. Be concise."
         composeText = ""
+        forceScrollAfterSend = true
         Task {
             try? await store.send(text: prompt)
         }

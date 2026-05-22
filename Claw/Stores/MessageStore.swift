@@ -277,8 +277,13 @@ final class MessageStore {
     private func applyHistory(payload: [String: JSONValue], requestedLimit: Int) {
         guard let messagesValue = payload["messages"],
               case .array(let arr) = messagesValue else {
-            messages = []
-            hasMore = false
+            // Preserve the last-known transcript on malformed/transient history
+            // responses. Treating a bad payload as an empty transcript is what
+            // makes conversations look like they were archived/lost when two
+            // clients race a refresh.
+            if messages.isEmpty {
+                messages = loadMessageCache()
+            }
             return
         }
 

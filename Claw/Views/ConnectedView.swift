@@ -16,6 +16,7 @@ struct ConnectedView: View {
     @State private var cronStore: CronStore?
     @State private var terminalSessionStore: TerminalSessionStore?
     @State private var runbookStore: RunbookStore?
+    @State private var modelRouterStore: ModelRouterStore?
 
     // Stream 7–14 stores
     @State private var agentMonitorStore: AgentMonitorStore?
@@ -32,9 +33,10 @@ struct ConnectedView: View {
                let agentMon = agentMonitorStore,
                let bgAgent = bgAgentStore,
                let timeline = timelineStore,
-               let home = homeStore {
+               let home = homeStore,
+               let modelRouter = modelRouterStore {
                 content(sessions: sessions, nodes: nodes, skills: skills, client: client,
-                        agentMon: agentMon, bgAgent: bgAgent, timeline: timeline, home: home)
+                        agentMon: agentMon, bgAgent: bgAgent, timeline: timeline, home: home, modelRouter: modelRouter)
             } else {
                 ZStack {
                     Color.clawBg.ignoresSafeArea()
@@ -48,6 +50,9 @@ struct ConnectedView: View {
         .onAppear { setupStoresIfNeeded() }
         .onChange(of: appState.activeClient != nil) { _, hasClient in
             if hasClient { setupStoresIfNeeded() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            refreshDynamicStores()
         }
         // Connection banner overlaid at the top of the whole connected experience
         .connectionBanner(state: appState.connectionState) {
@@ -67,7 +72,8 @@ struct ConnectedView: View {
         agentMon: AgentMonitorStore,
         bgAgent: BackgroundAgentStore,
         timeline: MemoryTimelineStore,
-        home: HomeOrchestrationStore
+        home: HomeOrchestrationStore,
+        modelRouter: ModelRouterStore
     ) -> some View {
         if let approvalStore = toolApprovalStore,
            let memStore = memoryStore,
@@ -81,6 +87,7 @@ struct ConnectedView: View {
                 .environment(cStore)
                 .environment(terminalSessionStore)
                 .environment(runbookStore)
+                .environment(modelRouter)
                 .environment(agentMon)
                 .environment(bgAgent)
                 .environment(timeline)
@@ -92,6 +99,7 @@ struct ConnectedView: View {
                 .environment(skills)
                 .environment(terminalSessionStore)
                 .environment(runbookStore)
+                .environment(modelRouter)
                 .environment(agentMon)
                 .environment(bgAgent)
                 .environment(timeline)
@@ -141,6 +149,11 @@ struct ConnectedView: View {
             runbookStore = store
             Task { try? await store.load() }
         }
+        if modelRouterStore == nil {
+            let store = ModelRouterStore(client: client)
+            modelRouterStore = store
+            Task { await store.fetchAvailableModels() }
+        }
         if agentMonitorStore == nil {
             let store = AgentMonitorStore(client: client)
             agentMonitorStore = store
@@ -161,6 +174,22 @@ struct ConnectedView: View {
             homeStore = store
             Task { await store.loadAll() }
         }
+    }
+
+    private func refreshDynamicStores() {
+        Task {
+            if let sessionStore { try? await sessionStore.load() }
+            if let nodeStore { try? await nodeStore.load() }
+            if let skillsStore { try? await skillsStore.load() }
+            if let memoryStore { try? await memoryStore.reload() }
+            if let cronStore { try? await cronStore.load() }
+            if let terminalSessionStore { try? await terminalSessionStore.load() }
+            if let runbookStore { try? await runbookStore.load() }
+            if let modelRouterStore { await modelRouterStore.fetchAvailableModels() }
+            if let agentMonitorStore { await agentMonitorStore.refresh() }
+            if let bgAgentStore { await bgAgentStore.loadAll() }
+            if let timelineStore { try? await timelineStore.reload() }
+            if let homeStore { await homeStore.loadAll() }
         }
     }
 }

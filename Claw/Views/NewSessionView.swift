@@ -8,8 +8,10 @@ import SwiftUI
 struct NewSessionView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(SessionStore.self) private var sessionStore
+    @Environment(ModelRouterStore.self) private var modelRouterStore
 
     @State private var selectedAgentId: String = GatewayAgentId.main
+    @State private var selectedModelId: String = ""
     @State private var label: String = ""
     @State private var isCreating: Bool = false
     @State private var errorMessage: String?
@@ -22,12 +24,33 @@ struct NewSessionView: View {
             Form {
                 Section("Agent") {
                     Picker("Agent", selection: $selectedAgentId) {
-                        ForEach(GatewayAgentId.options) { option in
+                        ForEach(sessionStore.availableAgentOptions) { option in
                             Text(option.label).tag(option.id)
                         }
                     }
-                    .pickerStyle(.segmented)
+                    .pickerStyle(.menu)
                     .listRowBackground(Color.clawCard)
+                }
+
+                Section("Model") {
+                    Picker("Model", selection: $selectedModelId) {
+                        Text("Gateway default").tag("")
+                        ForEach(selectableModels) { model in
+                            Text(model.name).tag(model.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .listRowBackground(Color.clawCard)
+
+                    if modelRouterStore.isLoadingModels {
+                        HStack(spacing: 8) {
+                            ProgressView().tint(Color.clawAccent)
+                            Text("Refreshing models…")
+                                .font(.caption)
+                                .foregroundStyle(Color.clawMuted)
+                        }
+                        .listRowBackground(Color.clawCard)
+                    }
                 }
 
                 Section("Label (optional)") {
@@ -52,6 +75,15 @@ struct NewSessionView: View {
             .toolbarBackground(Color.clawBgAccent, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
+            .task {
+                await sessionStore.loadAvailableAgents()
+                await modelRouterStore.fetchAvailableModels()
+            }
+            .onChange(of: sessionStore.availableAgentOptions) { _, options in
+                if !options.contains(where: { $0.id == selectedAgentId }) {
+                    selectedAgentId = options.first?.id ?? GatewayAgentId.main
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -76,6 +108,11 @@ struct NewSessionView: View {
         }
     }
 
+    private var selectableModels: [ModelDefinition] {
+        let available = modelRouterStore.availableModels.filter { $0.isAvailable }
+        return available.isEmpty ? modelRouterStore.availableModels : available
+    }
+
     private func create() async {
         isCreating = true
         errorMessage = nil
@@ -83,7 +120,8 @@ struct NewSessionView: View {
         do {
             let key = try await sessionStore.createSession(
                 agentId: selectedAgentId,
-                label: label
+                label: label,
+                model: selectedModelId.isEmpty ? nil : selectedModelId
             )
             onCreated?(key)
             dismiss()

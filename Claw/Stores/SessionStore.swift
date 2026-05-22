@@ -25,6 +25,7 @@ final class SessionStore {
     private(set) var isLoading: Bool = false
     private(set) var loadError: Error?
     private(set) var mutationError: Error?
+    private(set) var availableAgentOptions: [GatewayAgentId.Option] = GatewayAgentId.options
 
     // MARK: - Private
 
@@ -100,6 +101,7 @@ final class SessionStore {
             )
             let payload = try await client.send(method: GatewayMethod.sessionsList, params: params)
             try applySessionsList(payload: payload)
+            await loadAvailableAgents()
             _ = try? await client.send(method: GatewayMethod.sessionsSubscribe, params: EmptyParams())
         } catch {
             loadError = error
@@ -132,12 +134,14 @@ final class SessionStore {
     /// `sessions.changed` event triggers a list reload to populate the new row;
     /// we also append a placeholder optimistically in case events lag.
     @discardableResult
-    func createSession(agentId: String, label: String?) async throws -> String {
+    func createSession(agentId: String, label: String?, model: String? = nil) async throws -> String {
         mutationError = nil
         let trimmedLabel = label?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedModel = model?.trimmingCharacters(in: .whitespacesAndNewlines)
         let params = SessionsCreateParams(
             agentId: agentId,
-            label: (trimmedLabel?.isEmpty ?? true) ? nil : trimmedLabel
+            label: (trimmedLabel?.isEmpty ?? true) ? nil : trimmedLabel,
+            model: (trimmedModel?.isEmpty ?? true) ? nil : trimmedModel
         )
         do {
             let payload = try await client.send(method: GatewayMethod.sessionsCreate, params: params)
@@ -165,6 +169,39 @@ final class SessionStore {
         } catch {
             mutationError = error
             throw error
+        }
+    }
+
+    // MARK: - Dynamic agent discovery
+
+    func loadAvailableAgents() async {
+        struct EmptyParams: Encodable {}
+        guard let payload = try? await client.send(method: GatewayMethod.agentsList, params: EmptyParams()) else { return }
+        let candidates: [JSONValue]
+        if let v = payload["agents"], case .array(let arr) = v {
+            candidates = arr
+        } else if let v = payload["items"], case .array(let arr) = v {
+            candidates = arr
+        } else {
+            return
+        }
+
+        let parsed: [GatewayAgentId.Option] = candidates.compactMap { item in
+            guard case .object(let obj) = item else { return nil }
+            let id: String?
+            if let v = obj["id"], case .string(let s) = v, !s.isEmpty { id = s }
+            else if let v = obj["agentId"], case .string(let s) = v, !s.isEmpty { id = s }
+            else { id = nil }
+            guard let id else { return nil }
+            let label: String
+            if let v = obj["label"], case .string(let s) = v, !s.isEmpty { label = s }
+            else if let v = obj["name"], case .string(let s) = v, !s.isEmpty { label = s }
+            else { label = id }
+            return GatewayAgentId.Option(id: id, label: label)
+        }
+
+        if !parsed.isEmpty {
+            availableAgentOptions = parsed
         }
     }
 
@@ -235,7 +272,16 @@ final class SessionStore {
     private func applySessionsList(payload: [String: JSONValue]) throws {
         guard let sessionsValue = payload["sessions"],
               case .array(let arr) = sessionsValue else {
-            sessions = []
+            // Do not wipe the visible list on a malformed/transient gateway response.
+            // Users reported sessions disappearing when desktop + iOS were active; preserving
+            // the last known cache is safer than treating an invalid payload as authoritative.
+            if sessions.isEmpty { sessions = loadSessionCache() }
+            return
+        }
+
+        if arr.isEmpty, !sessions.isEmpty {
+            // Treat a sudden empty list as transient unless the user explicitly deleted rows.
+            // A real empty state still appears on cold start because `sessions` will be empty.
             return
         }
 
@@ -355,6 +401,7 @@ final class SessionStore {
             guard let session = parseSession(obj: event.payload) else { return }
             if !sessions.contains(where: { $0.id == session.id }) {
                 sessions.insert(session, at: 0)
+                saveSessionCache(sessions)
             }
 
         case "session.updated":
@@ -364,11 +411,13 @@ final class SessionStore {
             } else {
                 sessions.insert(session, at: 0)
             }
+            saveSessionCache(sessions)
 
         case "session.deleted":
             guard let keyValue = event.payload["key"],
                   case .string(let key) = keyValue else { return }
             sessions.removeAll { $0.id == key }
+            saveSessionCache(sessions)
 
         case "chat":
             guard let skVal = event.payload["sessionKey"],
@@ -380,6 +429,9 @@ final class SessionStore {
                     sessions[idx].agentStatus = .idle
                 }
             }
+
+        case "agents.changed", "models.changed", "config.changed", GatewayEventName.modelHealthUpdate, GatewayEventName.modelRoutingChanged:
+            Task { await loadAvailableAgents() }
 
         case "sessions.changed":
             if let skVal = event.payload["sessionKey"],
@@ -456,18 +508,18 @@ private struct SessionsListParams: Encodable {
 private struct SessionsCreateParams: Encodable {
     let agentId: String
     let label: String?
+    let model: String?
 
     enum CodingKeys: String, CodingKey {
-        case agentId, label
+        case agentId, label, model
     }
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(agentId, forKey: .agentId)
-        // Only encode label when non-nil so the gateway validator doesn't see a null.
-        if let label {
-            try c.encode(label, forKey: .label)
-        }
+        // Only encode optional fields when non-nil so the gateway validator doesn't see null.
+        if let label { try c.encode(label, forKey: .label) }
+        if let model { try c.encode(model, forKey: .model) }
     }
 }
 

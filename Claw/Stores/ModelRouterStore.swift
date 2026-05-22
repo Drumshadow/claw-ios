@@ -158,20 +158,32 @@ final class ModelRouterStore {
         isLoadingModels = true
         defer { isLoadingModels = false }
 
-        struct EmptyParams: Encodable {}
-        guard let response = try? await client.send(method: GatewayMethod.modelsList, params: EmptyParams()) else { return }
+        struct ModelsListParams: Encodable { let view: String }
+        guard let response = try? await client.send(method: GatewayMethod.modelsList, params: ModelsListParams(view: "configured")) else { return }
 
         if let modelsArr = response["models"]?.arrayValue {
             let updated: [ModelDefinition] = modelsArr.compactMap { item in
-                guard let obj = item.objectValue,
-                      let id = obj["id"]?.stringValue,
-                      let name = obj["name"]?.stringValue,
-                      let providerStr = obj["provider"]?.stringValue,
-                      let provider = ModelProviderType(rawValue: providerStr)
-                else { return nil }
+                guard let obj = item.objectValue else { return nil }
+                let id = obj["id"]?.stringValue
+                    ?? obj["model"]?.stringValue
+                    ?? obj["modelId"]?.stringValue
+                guard let id, !id.isEmpty else { return nil }
+                let name = obj["name"]?.stringValue
+                    ?? obj["displayName"]?.stringValue
+                    ?? obj["label"]?.stringValue
+                    ?? id
+                let providerStr = obj["provider"]?.stringValue
+                    ?? obj["modelProvider"]?.stringValue
+                    ?? id.split(separator: "/").first.map(String.init)
+                    ?? "custom"
+                let provider = Self.providerType(fromGatewayProvider: providerStr)
 
-                let contextWindow = obj["contextWindow"]?.intValue ?? 4096
-                let maxOutput     = obj["maxOutput"]?.intValue ?? 2048
+                let contextWindow = obj["contextWindow"]?.intValue
+                    ?? obj["contextTokens"]?.intValue
+                    ?? 4096
+                let maxOutput     = obj["maxOutput"]?.intValue
+                    ?? obj["maxOutputTokens"]?.intValue
+                    ?? 2048
                 let latencyStr    = obj["latency"]?.stringValue ?? "medium"
                 let latency       = LatencyClass(rawValue: latencyStr) ?? .medium
                 let capStrs       = obj["capabilities"]?.arrayValue?.compactMap(\.stringValue) ?? []
@@ -210,6 +222,19 @@ final class ModelRouterStore {
         }
     }
 
+    private static func providerType(fromGatewayProvider provider: String) -> ModelProviderType {
+        let normalized = provider.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        switch normalized {
+        case "anthropic", "claude", "claude-cli": return .claude
+        case "openai", "openai-codex", "codex": return .openai
+        case "google", "gemini": return .gemini
+        case "ollama": return .ollama
+        case "lmstudio", "lm-studio": return .lmstudio
+        case "groq": return .groq
+        default: return ModelProviderType(rawValue: normalized) ?? .custom
+        }
+    }
+
     // MARK: - Event subscription
 
     private func startEventSubscription(client: GatewayClient) {
@@ -236,6 +261,9 @@ final class ModelRouterStore {
             if let idx = availableModels.firstIndex(where: { $0.id == modelId }) {
                 availableModels[idx].isAvailable = isAvailable
             }
+
+        case "models.changed", "config.changed", "providers.changed":
+            Task { await fetchAvailableModels() }
 
         default:
             break

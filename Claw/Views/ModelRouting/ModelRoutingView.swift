@@ -6,7 +6,7 @@ import SwiftUI
 // Accessible from Settings.
 
 struct ModelRoutingView: View {
-    @State private var store = ModelRouterStore()
+    @Environment(ModelRouterStore.self) private var store
     @State private var showAddProfile  = false
     @State private var editingProfile: RoutingProfile? = nil
     @State private var showProviders   = false
@@ -135,6 +135,7 @@ struct ModelRoutingView: View {
                 ModelCatalogView(models: store.availableModels)
             }
         }
+        .task { await store.fetchAvailableModels() }
     }
 }
 
@@ -798,4 +799,5 @@ struct ProviderEditorView: View {
 
 #Preview {
     ModelRoutingView()
+        .environment(ModelRouterStore())
 }
