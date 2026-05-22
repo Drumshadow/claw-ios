@@ -33,7 +33,7 @@ extension Color {
     static let clawWarn        = Color(clawHex: 0xf59e0b)
     static let clawDanger      = Color(clawHex: 0xef4444)
 
-    private init(clawHex hex: UInt32) {
+    init(clawHex hex: UInt32) {
         self.init(
             .sRGB,
             red:   Double((hex >> 16) & 0xFF) / 255,
