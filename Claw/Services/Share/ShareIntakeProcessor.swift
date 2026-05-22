@@ -14,10 +14,10 @@ final class ShareIntakeProcessor {
 
     private let queue: ShareIntakeQueue
     private let metadataExtractor: ShareMetadataExtractor
-    private var processingTask: Task<Void, Never>?
+    nonisolated(unsafe) private var processingTask: Task<Void, Never>?
 
-    init(queue: ShareIntakeQueue = .shared) {
-        self.queue = queue
+    init(queue: ShareIntakeQueue? = nil) {
+        self.queue = queue ?? ShareIntakeQueue.shared
         self.metadataExtractor = ShareMetadataExtractor()
     }
 
@@ -46,8 +46,8 @@ final class ShareIntakeProcessor {
         let pending = queue.pendingItems
         guard !pending.isEmpty else { return }
 
-        queue.isProcessing = true
-        defer { queue.isProcessing = false }
+        queue.setProcessing(true)
+        defer { queue.setProcessing(false) }
 
         for var item in pending {
             guard !Task.isCancelled else { break }

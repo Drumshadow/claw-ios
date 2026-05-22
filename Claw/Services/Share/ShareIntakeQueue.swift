@@ -105,6 +105,10 @@ final class ShareIntakeQueue {
         saveToDisk()
     }
 
+    func setProcessing(_ processing: Bool) {
+        isProcessing = processing
+    }
+
     // MARK: - Query
 
     var pendingItems: [ShareIntakeItem] {
