@@ -76,6 +76,10 @@ struct RollbackSnapshot: Identifiable, Codable {
     var canRollback: Bool {
         status.canRollback && !isExpired
     }
+
+    var isTerminal: Bool {
+        status.isTerminal
+    }
 }
 
 // MARK: - RollbackSnapshotStore
