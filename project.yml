@@ -12,6 +12,17 @@ packages:
   Citadel:
     url: https://github.com/orlandos-nl/Citadel
     from: "0.7.0"
+schemes:
+  Claw:
+    build:
+      targets:
+        Claw: all
+    run:
+      config: Debug
+      executable: Claw
+    archive:
+      config: Release
+
 targets:
   Claw:
     type: application
