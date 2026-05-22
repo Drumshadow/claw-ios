@@ -103,6 +103,7 @@ targets:
       - path: Claw/Models/VoiceCommandIntent.swift   # for VoiceCommandRisk
       - path: Claw/Services/Share/ShareIntakeQueue.swift
       - path: Claw/Services/Share/ShareMetadataExtractor.swift
+      - path: Claw/Views/Share/ShareActionPickerView.swift
       - path: Claw/Theme/ClawTheme.swift
     settings:
       base:
