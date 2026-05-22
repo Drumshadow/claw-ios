@@ -468,18 +468,8 @@ struct GroceryListView: View {
         Group {
             if let list = store.primaryGroceryList {
                 List {
-                    ForEach(GroceryCategory.allCases) { cat in
-                        let items = list.items.filter { $0.category == cat }
-                        if !items.isEmpty {
-                            Section(cat.displayName) {
-                                ForEach(items) { item in
-                                    GroceryItemRow(item: item) {
-                                        Task { await store.toggleGroceryItem(listId: list.id, itemId: item.id) }
-                                    }
-                                    .listRowBackground(Color.clawCard)
-                                }
-                            }
-                        }
+                    ForEach(GroceryCategory.allCases, id: \.self) { category in
+                        GroceryCategorySection(list: list, category: category)
                     }
                 }
                 .scrollContentBackground(.hidden)
@@ -543,13 +533,36 @@ struct GroceryListView: View {
     }
 }
 
+private struct GroceryCategorySection: View {
+    let list: GroceryList
+    let category: GroceryCategory
+
+    private var items: [GroceryItem] {
+        list.items.filter { $0.category == category }
+    }
+
+    var body: some View {
+        if !items.isEmpty {
+            Section(category.displayName) {
+                ForEach(items) { item in
+                    GroceryItemRow(item: item, listId: list.id)
+                        .listRowBackground(Color.clawCard)
+                }
+            }
+        }
+    }
+}
+
 private struct GroceryItemRow: View {
+    @Environment(HomeOrchestrationStore.self) private var store
     let item: GroceryItem
-    let onToggle: () -> Void
+    let listId: String
 
     var body: some View {
         HStack(spacing: 10) {
-            Button(action: onToggle) {
+            Button {
+                Task { await store.toggleGroceryItem(listId: listId, itemId: item.id) }
+            } label: {
                 Image(systemName: item.isBought ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 18))
                     .foregroundStyle(item.isBought ? Color.clawOk : Color.clawMuted)
