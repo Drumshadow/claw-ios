@@ -542,3 +542,39 @@ struct GroceryListView: View {
         }
     }
 }
+
+private struct GroceryItemRow: View {
+    let item: GroceryItem
+    let onToggle: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button(action: onToggle) {
+                Image(systemName: item.isBought ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 18))
+                    .foregroundStyle(item.isBought ? Color.clawOk : Color.clawMuted)
+            }
+            .buttonStyle(.plain)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.name)
+                    .font(.system(size: 14))
+                    .foregroundStyle(item.isBought ? Color.clawMuted : Color.clawText)
+                    .strikethrough(item.isBought)
+                if let qty = item.quantity {
+                    Text(qty)
+                        .font(.caption2)
+                        .foregroundStyle(Color.clawMuted)
+                }
+            }
+
+            Spacer()
+
+            if item.addedByAgent {
+                Image(systemName: "cpu")
+                    .font(.caption2)
+                    .foregroundStyle(Color.clawTeal.opacity(0.6))
+            }
+        }
+    }
+}

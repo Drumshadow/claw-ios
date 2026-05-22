@@ -120,7 +120,7 @@ struct IncidentDetailView: View {
                 .font(.caption2)
                 .foregroundStyle(Color.clawMuted)
                 if let resolved = incident.resolvedAt {
-                    Label("Resolved " + resolved.formatted(.relative(presentation: .named)))
+                    Text("Resolved " + resolved.formatted(.relative(presentation: .named)))
                         .font(.caption2)
                         .foregroundStyle(Color.clawOk.opacity(0.8))
                 }
