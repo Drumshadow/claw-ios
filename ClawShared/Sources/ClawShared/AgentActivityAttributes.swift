@@ -1,6 +1,8 @@
+#if os(iOS)
 import ActivityKit
 import Foundation
 
+@available(iOS 16.1, *)
 public struct AgentActivityAttributes: ActivityAttributes {
     public struct ContentState: Codable, Hashable, Sendable {
         public var sessionTitle: String
@@ -24,3 +26,4 @@ public struct AgentActivityAttributes: ActivityAttributes {
         self.sessionId = sessionId
     }
 }
+#endif

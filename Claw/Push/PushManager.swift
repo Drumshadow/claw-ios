@@ -74,7 +74,7 @@ final class PushManager {
         let params = APNSRegisterParams(
             token: token,
             environment: env,
-            bundleId: "ai.claw.app"
+            bundleId: "ai.clawos.app"
         )
 
         do {

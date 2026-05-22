@@ -48,7 +48,7 @@ struct QRScannerView: View {
                 if let config = parse(code) {
                     onScan(config)
                 } else {
-                    parseError = "Not a valid OpenClaw QR code. Try: openclaw://gateway?host=…"
+                    parseError = "Not a valid Claw QR code. Try: openclaw://gateway?host=…"
                     // Reset after 2 seconds
                     Task {
                         try? await Task.sleep(nanoseconds: 2_000_000_000)

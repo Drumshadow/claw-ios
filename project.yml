@@ -1,6 +1,6 @@
 name: Claw
 options:
-  bundleIdPrefix: ai.claw
+  bundleIdPrefix: ai.clawos
   deploymentTarget:
     iOS: "17.0"
 packages:
@@ -22,7 +22,7 @@ targets:
       Release: Claw/Config/Secrets.xcconfig
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: ai.claw.app
+        PRODUCT_BUNDLE_IDENTIFIER: ai.clawos.app
         SWIFT_VERSION: 5.9
         DEVELOPMENT_TEAM: UD4F4U8M59
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -52,7 +52,7 @@ targets:
           - _openclaw._tcp.
         NSCalendarsFullAccessUsageDescription: "Claw can share your calendar with the agent to answer scheduling questions."
         NSContactsUsageDescription: "Claw can share your contacts with the agent to help you communicate."
-        NSLocalNetworkUsageDescription: "Claw needs local network access to discover OpenClaw gateways on your network."
+        NSLocalNetworkUsageDescription: "Claw needs local network access to discover AI agent gateways on your network."
         NSCameraUsageDescription: "Claw uses the camera to scan QR codes for quick gateway setup."
         # No ATS exceptions: all gateway traffic uses WSS, and all external API
         # clients (GitHub / Datadog / AWS) hardcode HTTPS. Previously this
@@ -66,7 +66,7 @@ targets:
           - remote-notification
           - fetch
         BGTaskSchedulerPermittedIdentifiers:
-          - ai.claw.health-check
+          - ai.clawos.health-check
         UILaunchScreen:
           UIColorName: ""
           UIImageName: ""
@@ -82,7 +82,7 @@ targets:
         NSSupportsLiveActivities: true
         NSSupportsLiveActivitiesFrequentUpdates: true
         CFBundleURLTypes:
-          - CFBundleURLName: ai.claw.oauth
+          - CFBundleURLName: ai.clawos.oauth
             CFBundleURLSchemes:
               - claw
 
@@ -92,7 +92,7 @@ targets:
     sources: [ClawWidgets]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: ai.claw.app.widgets
+        PRODUCT_BUNDLE_IDENTIFIER: ai.clawos.app.widgets
         SWIFT_VERSION: 5.9
         DEVELOPMENT_TEAM: UD4F4U8M59
     dependencies:
@@ -103,3 +103,24 @@ targets:
       properties:
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
+
+  ClawWatch:
+    type: application
+    platform: watchOS
+    deploymentTarget: "10.0"
+    sources: [ClawWatch]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.clawos.app.watchkitapp
+        SWIFT_VERSION: 5.9
+        DEVELOPMENT_TEAM: UD4F4U8M59
+    dependencies:
+      - package: ClawShared
+        product: ClawShared
+    info:
+      path: ClawWatch/Info.plist
+      properties:
+        CFBundleDisplayName: Claw
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        WKCompanionAppBundleIdentifier: ai.clawos.app

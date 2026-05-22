@@ -62,6 +62,7 @@ struct MessageBubbleView: View {
                             .font(.system(size: 15))
                             .foregroundStyle(Color.clawText)
                             .multilineTextAlignment(.leading)
+                            .textSelection(.enabled)
                     }
                 } else {
                     MarkdownTextView(text: displayText)
@@ -74,6 +75,13 @@ struct MessageBubbleView: View {
         .padding(.vertical, 10)
         .background(bubbleBackground)
         .overlay(bubbleBorder)
+        .contextMenu {
+            Button {
+                UIPasteboard.general.string = message.content
+            } label: {
+                Label("Copy", systemImage: "doc.on.doc")
+            }
+        }
     }
 
     @ViewBuilder

@@ -34,7 +34,7 @@ final class AppState {
 
     // MARK: - Persistence key
 
-    private static let configDefaultsKey = "ai.claw.selectedGatewayConfig"
+    private static let configDefaultsKey = "ai.clawos.selectedGatewayConfig"
 
     // MARK: - Init
 

@@ -9,6 +9,7 @@ struct MarkdownTextView: View {
     var body: some View {
         Markdown(text)
             .markdownTheme(.claw)
+            .textSelection(.enabled)
             .markdownTextStyle {
                 FontSize(15)
             }

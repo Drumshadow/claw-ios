@@ -22,7 +22,7 @@ enum KeychainError: Error, LocalizedError {
 }
 
 enum KeychainStore {
-    private static let service = "ai.claw.app"
+    private static let service = "ai.clawos.app"
 
     static func save(key: String, data: Data) throws {
         let query: [String: Any] = [

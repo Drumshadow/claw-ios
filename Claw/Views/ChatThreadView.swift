@@ -27,6 +27,7 @@ struct ChatThreadView: View {
     @State private var showTimeline: Bool = false
     @State private var showModelPicker = false
     @State private var sendButtonPressed = false
+    @State private var avatarPulse: CGFloat = 1.0
     @State private var voiceManager = VoiceInputManager()
     @State private var slashSuggestions: [ClawSkill] = []
     @FocusState private var isComposeFocused: Bool
@@ -66,6 +67,10 @@ struct ChatThreadView: View {
 
     private var hasActiveStream: Bool {
         store.messages.contains { $0.id.hasPrefix("stream-") && $0.isStreaming }
+    }
+
+    private var currentToolName: String? {
+        store.messages.last(where: { $0.role == .tool && $0.isStreaming })?.toolName
     }
 
     private var isSendDisabled: Bool {
@@ -137,18 +142,65 @@ struct ChatThreadView: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 Button { showModelPicker = true } label: {
-                    VStack(spacing: 1) {
-                        Text(sessionForHeader.title)
-                            .font(.headline)
-                            .foregroundStyle(Color.clawTextStrong)
-                        if let model = sessionForHeader.model {
-                            Text(shortModelName(model))
-                                .font(.caption2)
-                                .foregroundStyle(Color.clawAccent)
-                        } else if isAgentActive, let statusText = agentStatus.displayText {
-                            Text(statusText)
-                                .font(.caption)
-                                .foregroundStyle(Color.clawMuted)
+                    HStack(spacing: 10) {
+                        // Avatar
+                        ZStack {
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [Color.clawTeal, Color.clawAccent],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 34, height: 34)
+                            if isAgentActive {
+                                Image(systemName: "cpu")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundStyle(.white)
+                                    .scaleEffect(avatarPulse)
+                            } else {
+                                Image(systemName: "brain")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundStyle(.white)
+                            }
+                        }
+                        // Title + status
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(sessionForHeader.title)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Color.clawTextStrong)
+                                .lineLimit(1)
+                            // Status subtitle
+                            if isAgentActive {
+                                if let tool = currentToolName {
+                                    HStack(spacing: 4) {
+                                        Circle()
+                                            .fill(Color.clawOk)
+                                            .frame(width: 3, height: 3)
+                                            .scaleEffect(avatarPulse)
+                                        Text(tool)
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(Color.clawTeal)
+                                            .lineLimit(1)
+                                    }
+                                } else {
+                                    HStack(spacing: 3) {
+                                        Text("Thinking")
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(Color.clawMuted)
+                                        AnimatedDotsView()
+                                    }
+                                }
+                            } else if let model = sessionForHeader.model, !model.isEmpty {
+                                Text(shortModelName(model))
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(Color.clawTeal.opacity(0.8))
+                            } else {
+                                Text("Connected")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(Color.clawOk.opacity(0.7))
+                            }
                         }
                     }
                 }
@@ -188,11 +240,29 @@ struct ChatThreadView: View {
         .task {
             await store.subscribe()
             store.updateSessionModel(sessionForHeader.model)
+
+            if isAgentActive {
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                    avatarPulse = 1.15
+                }
+            }
+
+            // Eagerly resolve model from config.get — session.model is often nil on first open
+            // because the gateway delivers it lazily. We need it now so the Dynamic Island
+            // shows the model name the moment the user backgrounds the app.
+            var resolvedModel: String? = sessionForHeader.model
+            if (resolvedModel == nil || resolvedModel!.isEmpty),
+               let payload = try? await client.send(method: GatewayMethod.configGet, params: EmptyParams()),
+               let modelVal = payload["model"], case .string(let m) = modelVal, !m.isEmpty {
+                resolvedModel = m
+                store.updateSessionModel(m)
+            }
+
             // Start persistent Live Activity so model name shows on island immediately
             LiveActivityManager.shared.startPersistentActivity(
                 sessionId: session.id,
                 sessionTitle: session.title,
-                model: sessionForHeader.model
+                model: resolvedModel
             )
             do {
                 try await store.load()
@@ -202,12 +272,6 @@ struct ChatThreadView: View {
         }
         .task {
             await voiceManager.requestPermissions()
-        }
-        .onChange(of: voiceManager.transcribedText) { _, text in
-            if voiceManager.isRecording {
-                // Live transcription preview while recording — no-op at MVP;
-                // composeText is appended when recording stops.
-            }
         }
         .sheet(isPresented: $showTimeline) {
             NavigationStack {
@@ -229,6 +293,17 @@ struct ChatThreadView: View {
         }
         .onChange(of: sessionForHeader.model) { _, newModel in
             store.updateSessionModel(newModel)
+        }
+        .onChange(of: isAgentActive) { _, active in
+            if active {
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                    avatarPulse = 1.15
+                }
+            } else {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    avatarPulse = 1.0
+                }
+            }
         }
     }
 
@@ -323,7 +398,7 @@ struct ChatThreadView: View {
                 }
             }
             .onChange(of: store.messages.last?.content) { _, _ in
-                if store.scrollAnchorAfterPrepend == nil, pendingScrollRestore == nil {
+                if store.scrollAnchorAfterPrepend == nil, pendingScrollRestore == nil, !isComposeFocused {
                     scrollToBottom(proxy: proxy, animated: false)
                 }
             }
@@ -563,6 +638,22 @@ struct ChatThreadView: View {
                 attachmentChips
                     .padding(.horizontal, 12)
                     .padding(.top, 8)
+            }
+            if voiceManager.isRecording && !voiceManager.transcribedText.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.clawDanger)
+                    Text(voiceManager.transcribedText)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.clawText)
+                        .lineLimit(3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(Color.clawDanger.opacity(0.08))
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             HStack(alignment: .bottom, spacing: 8) {
                 Button {
@@ -938,6 +1029,34 @@ private struct TypingIndicatorView: View {
         .onAppear {
             withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
                 phase = .pi * 2
+            }
+        }
+    }
+}
+
+// MARK: - AnimatedDotsView
+
+private struct AnimatedDotsView: View {
+    @State private var opacities: [Double] = [0.3, 0.3, 0.3]
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(0..<3, id: \.self) { i in
+                Circle()
+                    .fill(Color.clawMuted)
+                    .frame(width: 3, height: 3)
+                    .opacity(opacities[i])
+            }
+        }
+        .onAppear {
+            for i in 0..<3 {
+                withAnimation(
+                    .easeInOut(duration: 0.4)
+                    .delay(Double(i) * 0.15)
+                    .repeatForever(autoreverses: true)
+                ) {
+                    opacities[i] = 1.0
+                }
             }
         }
     }

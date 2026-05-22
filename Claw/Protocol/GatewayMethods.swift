@@ -64,6 +64,40 @@ enum GatewayMethod {
 
     // Phone context bridge methods
     static let phoneResponse = "phone.response"
+
+    // Terminal stream methods
+    // Expected backend contract:
+    //   terminal.sessions.list → [TerminalSessionPayload]
+    //   terminal.session.subscribe(sessionId: String) → void, starts terminal.output events
+    //   terminal.session.unsubscribe(sessionId: String) → void
+    //   terminal.session.history(sessionId: String, limit: Int, offset: Int) → [TerminalLinePayload]
+    //   terminal.session.input(sessionId: String, text: String) → void (Take Control mode)
+    //   terminal.session.resize(sessionId: String, cols: Int, rows: Int) → void
+    //   terminal.session.kill(sessionId: String) → void
+    static let terminalSessionsList       = "terminal.sessions.list"
+    static let terminalSessionSubscribe   = "terminal.session.subscribe"
+    static let terminalSessionUnsubscribe = "terminal.session.unsubscribe"
+    static let terminalSessionHistory     = "terminal.session.history"
+    static let terminalSessionInput       = "terminal.session.input"
+    static let terminalSessionResize      = "terminal.session.resize"
+    static let terminalSessionKill        = "terminal.session.kill"
+
+    // Runbook methods
+    // Expected backend contract:
+    //   runbooks.list → [RunbookPayload]
+    //   runbooks.execute(runbookId: String, mode: String, dryRun: Bool) → RunbookExecutionPayload
+    //   runbooks.execution.status(executionId: String) → RunbookExecutionPayload
+    //   runbooks.execution.approve(executionId: String, stepId: String) → void
+    //   runbooks.execution.deny(executionId: String, stepId: String, reason: String?) → void
+    //   runbooks.execution.abort(executionId: String) → void
+    //   runbooks.execution.rollback(executionId: String, stepId: String?) → void (nil = full rollback)
+    static let runbooksList               = "runbooks.list"
+    static let runbooksExecute            = "runbooks.execute"
+    static let runbooksExecutionStatus    = "runbooks.execution.status"
+    static let runbooksExecutionApprove   = "runbooks.execution.approve"
+    static let runbooksExecutionDeny      = "runbooks.execution.deny"
+    static let runbooksExecutionAbort     = "runbooks.execution.abort"
+    static let runbooksExecutionRollback  = "runbooks.execution.rollback"
 }
 
 // MARK: - Agent IDs offered when creating sessions
@@ -101,6 +135,32 @@ enum GatewayEventName {
 
     // Phone context bridge events
     static let phoneRequest = "phone.request"
+
+    // Terminal stream events
+    // terminal.output  payload: { sessionId: String, data: String, timestamp: Double }
+    // terminal.session.started  payload: { session: TerminalSessionPayload }
+    // terminal.session.ended    payload: { sessionId: String, exitCode: Int? }
+    // terminal.session.error    payload: { sessionId: String, message: String }
+    static let terminalOutput          = "terminal.output"
+    static let terminalSessionStarted  = "terminal.session.started"
+    static let terminalSessionEnded    = "terminal.session.ended"
+    static let terminalSessionError    = "terminal.session.error"
+
+    // Runbook events
+    // runbook.step.started           payload: { executionId, stepId, stepIndex }
+    // runbook.step.output            payload: { executionId, stepId, line: String, timestamp: Double }
+    // runbook.step.completed         payload: { executionId, stepId, exitCode: Int, durationMs: Int }
+    // runbook.step.failed            payload: { executionId, stepId, error: String }
+    // runbook.step.awaiting_approval payload: { executionId, stepId }
+    // runbook.execution.completed    payload: { executionId, status: String, durationMs: Int }
+    // runbook.execution.failed       payload: { executionId, error: String }
+    static let runbookStepStarted          = "runbook.step.started"
+    static let runbookStepOutput           = "runbook.step.output"
+    static let runbookStepCompleted        = "runbook.step.completed"
+    static let runbookStepFailed           = "runbook.step.failed"
+    static let runbookStepAwaitingApproval = "runbook.step.awaiting_approval"
+    static let runbookExecutionCompleted   = "runbook.execution.completed"
+    static let runbookExecutionFailed      = "runbook.execution.failed"
 }
 
 // MARK: - Connection state enum (shared between transport + app layer)

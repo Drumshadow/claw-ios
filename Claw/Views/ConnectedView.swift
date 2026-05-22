@@ -14,6 +14,8 @@ struct ConnectedView: View {
     @State private var toolApprovalStore: ToolApprovalStore?
     @State private var memoryStore: MemoryStore?
     @State private var cronStore: CronStore?
+    @State private var terminalSessionStore: TerminalSessionStore?
+    @State private var runbookStore: RunbookStore?
 
     var body: some View {
         Group {
@@ -57,11 +59,15 @@ struct ConnectedView: View {
                 .environment(approvalStore)
                 .environment(memStore)
                 .environment(cStore)
+                .environment(terminalSessionStore)
+                .environment(runbookStore)
         } else {
             AdaptiveSessionsLayout(client: client)
                 .environment(sessions)
                 .environment(nodes)
                 .environment(skills)
+                .environment(terminalSessionStore)
+                .environment(runbookStore)
         }
     }
 
@@ -97,6 +103,16 @@ struct ConnectedView: View {
             cronStore = store
             Task { try? await store.load() }
         }
+        if terminalSessionStore == nil {
+            let store = TerminalSessionStore(client: client)
+            terminalSessionStore = store
+            Task { try? await store.load() }
+        }
+        if runbookStore == nil {
+            let store = RunbookStore(client: client)
+            runbookStore = store
+            Task { try? await store.load() }
+        }
     }
 }
 
@@ -108,12 +124,18 @@ struct AdaptiveSessionsLayout: View {
 
     @Environment(SessionStore.self) private var sessionStore
     @Environment(NodeStore.self) private var nodeStore
+    @Environment(SkillsStore.self) private var skillsStore
+    @Environment(MemoryStore.self) private var memoryStore
+    @Environment(CronStore.self) private var cronStore
     @Environment(AppState.self) private var appState
     @Environment(ToolApprovalStore.self) private var toolApprovalStore
+    @Environment(TerminalSessionStore.self) private var terminalSessionStore: TerminalSessionStore?
+    @Environment(RunbookStore.self) private var runbookStore: RunbookStore?
     @State private var selectedSession: ClawSession?
     @State private var showSettings = false
     @State private var showNodes = false
     @State private var sidebarSelection: SidebarItem? = .sessions
+    @State private var router = NavigationRouter()
 
     var body: some View {
         Group {
@@ -208,31 +230,66 @@ struct AdaptiveSessionsLayout: View {
         }
     }
 
-    // MARK: - iPhone: NavigationStack
+    // MARK: - iPhone: TabView with 4 tabs
 
     private var iPhoneLayout: some View {
-        NavigationStack {
-            SessionListView(onSelect: { session in
-                selectedSession = session
-            })
-            .environment(sessionStore)
-            .navigationDestination(item: $selectedSession) { session in
-                ChatThreadView(
-                    session: session,
-                    client: client,
-                    onOpenChildSession: { child in
-                        selectedSession = child
-                    }
-                )
+        TabView(selection: Bindable(router).selectedTab) {
+            // MARK: Chat tab
+            NavigationStack {
+                SessionListView(onSelect: { session in
+                    selectedSession = session
+                })
                 .environment(sessionStore)
-                .id(session.id)
+                .navigationDestination(item: $selectedSession) { session in
+                    ChatThreadView(
+                        session: session,
+                        client: client,
+                        onOpenChildSession: { child in
+                            selectedSession = child
+                        }
+                    )
+                    .environment(sessionStore)
+                    .environment(skillsStore)
+                    .id(session.id)
+                }
+                .toolbar {
+                    nodesButton
+                    disconnectButton
+                }
             }
-            .toolbar {
-                settingsButton
-                nodesButton
-                disconnectButton
+            .tabItem { Label(ClawTab.chat.title, systemImage: ClawTab.chat.systemImage) }
+            .tag(ClawTab.chat)
+
+            // MARK: Ops tab
+            NavigationStack {
+                OpsTabView()
+                    .environment(terminalSessionStore)
+                    .environment(runbookStore)
             }
+            .tabItem { Label(ClawTab.ops.title, systemImage: ClawTab.ops.systemImage) }
+            .tag(ClawTab.ops)
+
+            // MARK: Dashboard tab
+            NavigationStack {
+                DashboardTabView()
+            }
+            .tabItem { Label(ClawTab.dashboard.title, systemImage: ClawTab.dashboard.systemImage) }
+            .tag(ClawTab.dashboard)
+
+            // MARK: More tab
+            NavigationStack {
+                MoreTabView(client: client)
+                    .environment(appState)
+                    .environment(sessionStore)
+                    .environment(skillsStore)
+                    .environment(memoryStore)
+                    .environment(cronStore)
+                    .environment(nodeStore)
+            }
+            .tabItem { Label(ClawTab.more.title, systemImage: ClawTab.more.systemImage) }
+            .tag(ClawTab.more)
         }
+        .tint(Color.clawAccent)
     }
 
     // MARK: - No-selection placeholder (iPad only)

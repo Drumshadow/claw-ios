@@ -7,7 +7,7 @@ import UserNotifications
 /// Manages BGTaskScheduler registration and handling for periodic SSH health checks.
 final class HealthCheckScheduler {
 
-    static let taskIdentifier = "ai.claw.health-check"
+    static let taskIdentifier = "ai.clawos.health-check"
 
     // MARK: - Registration
 

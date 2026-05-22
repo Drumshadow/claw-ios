@@ -468,7 +468,7 @@ final class MessageStore {
             LiveActivityManager.shared.setIdle()
             if UIApplication.shared.applicationState != .active {
                 let content = UNMutableNotificationContent()
-                content.title = sessionTitle.isEmpty ? "OpenClaw" : sessionTitle
+                content.title = sessionTitle.isEmpty ? "Claw" : sessionTitle
                 content.body = "Agent has responded"
                 content.sound = .default
                 let request = UNNotificationRequest(
