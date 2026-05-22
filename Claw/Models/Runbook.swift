@@ -105,7 +105,7 @@ enum RunbookExecutionStatus: String, Codable, Equatable {
 // MARK: - RunbookStep
 
 /// A single step within a runbook definition.
-struct RunbookStep: Identifiable, Codable, Equatable {
+struct RunbookStep: Identifiable, Codable, Equatable, Hashable {
     var id: UUID
     var name: String
     var description: String
@@ -163,7 +163,7 @@ struct RunbookStep: Identifiable, Codable, Equatable {
 // MARK: - Runbook
 
 /// A reusable runbook definition — a named sequence of steps with metadata.
-struct Runbook: Identifiable, Codable, Equatable {
+struct Runbook: Identifiable, Codable, Equatable, Hashable {
     var id: UUID
     var name: String
     var description: String

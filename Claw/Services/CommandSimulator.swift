@@ -105,7 +105,7 @@ struct CommandSimulator {
         let riskAssessmentStr = response["riskAssessment"]?.stringValue ?? "Unable to assess risk."
         let riskLevelStr      = response["riskLevel"]?.stringValue ?? "caution"
         let riskLevel         = RiskLevel(rawValue: riskLevelStr) ?? PolicyEngine.inferRisk(from: toolName)
-        let requiresSnapshot  = response["requiresSnapshot"]?.boolValue ?? riskLevel >= .danger
+        let requiresSnapshot  = response["requiresSnapshot"]?.boolValue ?? (riskLevel >= .danger)
 
         let durationMs = response["estimatedDurationMs"]?.intValue
         let durationStr = durationMs.map { ms in

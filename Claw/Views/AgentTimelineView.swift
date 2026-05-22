@@ -151,7 +151,7 @@ struct AgentTimelineView: View {
             } else {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(cachedEvents.enumerated()), id: \.element.id) { index, event in
-                        TimelineEventRow(
+                        AgentTimelineEventRow(
                             event: event,
                             isLast: index == cachedEvents.count - 1
                         )
@@ -186,9 +186,9 @@ struct AgentTimelineView: View {
     }
 }
 
-// MARK: - TimelineEventRow
+// MARK: - AgentTimelineEventRow
 
-private struct TimelineEventRow: View {
+private struct AgentTimelineEventRow: View {
     let event: TimelineEvent
     let isLast: Bool
     @State private var isExpanded: Bool = false

@@ -72,6 +72,10 @@ struct RollbackSnapshot: Identifiable, Codable {
         guard let exp = expiresAt else { return false }
         return Date() > exp
     }
+
+    var canRollback: Bool {
+        status.canRollback && !isExpired
+    }
 }
 
 // MARK: - RollbackSnapshotStore

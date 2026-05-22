@@ -264,7 +264,7 @@ enum OpsSubTab: String, CaseIterable {
 // MARK: - ActiveExecutionChip
 
 struct ActiveExecutionChip: View {
-    @ObservedObject var execution: RunbookExecution
+    let execution: RunbookExecution
 
     var body: some View {
         HStack(spacing: 6) {
