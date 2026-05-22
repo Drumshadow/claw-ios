@@ -96,7 +96,7 @@ struct VoiceOpsButton: View {
 
     private var iconForState: Image {
         switch manager.state {
-        case .idle, .requestingPermission, .ready, .processing:
+        case .idle, .requestingPermission, .ready, .processing, .confirmationNeeded:
             return Image(systemName: "mic.fill")
         case .recording:
             return Image(systemName: "waveform")
@@ -109,7 +109,7 @@ struct VoiceOpsButton: View {
 
     private var colorForState: Color {
         switch manager.state {
-        case .idle, .requestingPermission, .ready, .processing:
+        case .idle, .requestingPermission, .ready, .processing, .confirmationNeeded:
             return .clawMuted
         case .recording:
             return .clawDanger
@@ -124,6 +124,8 @@ struct VoiceOpsButton: View {
         switch manager.state {
         case .recording:
             return Color.clawDanger.opacity(0.15)
+        case .confirmationNeeded:
+            return Color.clawWarn.opacity(0.15)
         case .speaking:
             return Color.clawTeal.opacity(0.15)
         default:
@@ -137,7 +139,7 @@ struct VoiceOpsButton: View {
             return manager.hasPermission
         case .recording:
             return true
-        case .unavailable, .requestingPermission, .processing, .speaking:
+        case .unavailable, .requestingPermission, .processing, .confirmationNeeded, .speaking:
             return false
         }
     }

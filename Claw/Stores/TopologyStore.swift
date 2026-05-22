@@ -31,8 +31,8 @@ final class TopologyStore {
     // MARK: - Private
 
     private let client: GatewayClient
-    private var eventTask: Task<Void, Never>?
-    private var refreshTask: Task<Void, Never>?
+    nonisolated(unsafe) private var eventTask: Task<Void, Never>?
+    nonisolated(unsafe) private var refreshTask: Task<Void, Never>?
     private static let refreshInterval: TimeInterval = 30
 
     private let decoder = JSONDecoder()

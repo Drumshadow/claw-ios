@@ -43,7 +43,7 @@ final class VoiceSessionBridge {
     let sessionKey: String
 
     // Tracks in-flight send
-    private var sendTask: Task<Void, Never>?
+    nonisolated(unsafe) private var sendTask: Task<Void, Never>?
 
     // MARK: - Init
 
@@ -150,7 +150,7 @@ final class VoiceSessionBridge {
         var accumulated = ""
         var gotComplete = false
 
-        let eventStream = client.events()
+        let eventStream = await client.events()
 
         let timeoutTask = Task {
             try? await Task.sleep(nanoseconds: 60_000_000_000)

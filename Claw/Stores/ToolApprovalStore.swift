@@ -232,7 +232,7 @@ final class ToolApprovalStore {
                 toolName: toolName,
                 toolInputSummary: inputSummary,
                 environment: environment,
-                ttlSeconds: matchedPolicy?.timeoutSeconds.flatMap { $0 > 0 ? $0 * 10 : nil } ?? 3600
+                ttlSeconds: matchedPolicy.flatMap { $0.timeoutSeconds > 0 ? $0.timeoutSeconds * 10 : nil } ?? 3600
             )
             snapshotId = snapshot.id
         }
