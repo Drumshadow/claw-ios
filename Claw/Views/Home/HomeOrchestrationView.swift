@@ -434,9 +434,13 @@ struct HomeTaskRow: View {
                             .foregroundStyle(Color.clawTeal.opacity(0.8))
                     }
                     if let due = task.dueDate {
-                        Label(due, format: .dateTime.month().day())
-                            .font(.caption2)
-                            .foregroundStyle(due < Date() ? Color.clawDanger : Color.clawMuted)
+                        Label {
+                            Text(due, format: Date.FormatStyle.dateTime.month().day())
+                        } icon: {
+                            Image(systemName: "calendar")
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(due < Date() ? Color.clawDanger : Color.clawMuted)
                     }
                 }
             }
@@ -469,33 +473,8 @@ struct GroceryListView: View {
                         if !items.isEmpty {
                             Section(cat.displayName) {
                                 ForEach(items) { item in
-                                    HStack(spacing: 10) {
-                                        Button {
-                                            Task { await store.toggleGroceryItem(listId: list.id, itemId: item.id) }
-                                        } label: {
-                                            Image(systemName: item.isBought ? "checkmark.circle.fill" : "circle")
-                                                .font(.system(size: 18))
-                                                .foregroundStyle(item.isBought ? Color.clawOk : Color.clawMuted)
-                                        }
-                                        .buttonStyle(.plain)
-
-                                        VStack(alignment: .leading, spacing: 1) {
-                                            Text(item.name)
-                                                .font(.system(size: 14))
-                                                .foregroundStyle(item.isBought ? Color.clawMuted : Color.clawText)
-                                                .strikethrough(item.isBought)
-                                            if let qty = item.quantity {
-                                                Text(qty).font(.caption2).foregroundStyle(Color.clawMuted)
-                                            }
-                                        }
-
-                                        Spacer()
-
-                                        if item.addedByAgent {
-                                            Image(systemName: "cpu")
-                                                .font(.caption2)
-                                                .foregroundStyle(Color.clawTeal.opacity(0.6))
-                                        }
+                                    GroceryItemRow(item: item) {
+                                        Task { await store.toggleGroceryItem(listId: list.id, itemId: item.id) }
                                     }
                                     .listRowBackground(Color.clawCard)
                                 }

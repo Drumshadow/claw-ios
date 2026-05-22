@@ -112,9 +112,13 @@ struct IncidentDetailView: View {
                 .foregroundStyle(Color.clawText)
 
             HStack(spacing: 16) {
-                Label(incident.createdAt, format: .dateTime.month().day().hour().minute())
-                    .font(.caption2)
-                    .foregroundStyle(Color.clawMuted)
+                Label {
+                    Text(incident.createdAt, format: Date.FormatStyle.dateTime.month().day().hour().minute())
+                } icon: {
+                    Image(systemName: "clock")
+                }
+                .font(.caption2)
+                .foregroundStyle(Color.clawMuted)
                 if let resolved = incident.resolvedAt {
                     Label("Resolved " + resolved.formatted(.relative(presentation: .named)))
                         .font(.caption2)
