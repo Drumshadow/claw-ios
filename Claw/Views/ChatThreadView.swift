@@ -487,13 +487,23 @@ struct ChatThreadView: View {
                     }
                 }
                 .onChange(of: store.isLoading) { _, isLoading in
-                    // Yield one run-loop turn after load so LazyVStack finishes layout
-                    // before scrollToBottom fires (defaultScrollAnchor handles cold-open;
-                    // this catches the edge case where messages arrive after first render).
-                    if !isLoading, pendingScrollRestore == nil, isNearBottom {
+                    // Yield one run-loop turn after load so LazyVStack finishes layout.
+                    // On cold-open, always land at the latest message; after that,
+                    // preserve native chat behavior and only follow while near bottom.
+                    if !isLoading, pendingScrollRestore == nil, !store.isLoadingMore {
                         Task { @MainActor in
                             try? await Task.sleep(nanoseconds: 150_000_000)
                             scrollToBottom(proxy: proxy, animated: false)
+                            isNearBottom = true
+                        }
+                    }
+                }
+                .onAppear {
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 200_000_000)
+                        if pendingScrollRestore == nil, !store.messages.isEmpty {
+                            scrollToBottom(proxy: proxy, animated: false)
+                            isNearBottom = true
                         }
                     }
                 }
@@ -799,11 +809,8 @@ struct ChatThreadView: View {
                             )
                     )
                     .lineLimit(1...6)
-                    .submitLabel(.send)
+                    .submitLabel(.return)
                     .focused($isComposeFocused)
-                    .onSubmit {
-                        if !isSendDisabled { sendMessage() }
-                    }
 
                 Button {
                     sendButtonPressed = true

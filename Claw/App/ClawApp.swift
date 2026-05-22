@@ -136,9 +136,16 @@ struct ConnectingView: View {
             Color.clawBg.ignoresSafeArea()
 
             VStack(spacing: 20) {
+                Image("AppLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 92, height: 92)
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .shadow(color: Color.clawAccent.opacity(0.24), radius: 18, y: 10)
+
                 ProgressView()
                     .progressViewStyle(.circular)
-                    .scaleEffect(1.4)
+                    .scaleEffect(1.1)
                     .tint(Color.clawAccent)
                 Text("Connecting…")
                     .font(.headline)
