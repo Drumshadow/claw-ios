@@ -117,6 +117,19 @@ targets:
           - group.ai.clawos.shared
     info:
       path: ClawShareExtension/Info.plist
+      properties:
+        CFBundleDisplayName: Send to Claw
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsWebURLWithMaxCount: 10
+              NSExtensionActivationSupportsImageWithMaxCount: 10
+              NSExtensionActivationSupportsFileWithMaxCount: 10
+              NSExtensionActivationSupportsText: true
 
   ClawWidgets:
     type: app-extension
