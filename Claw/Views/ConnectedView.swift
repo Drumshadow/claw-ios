@@ -17,13 +17,24 @@ struct ConnectedView: View {
     @State private var terminalSessionStore: TerminalSessionStore?
     @State private var runbookStore: RunbookStore?
 
+    // Stream 7–14 stores
+    @State private var agentMonitorStore: AgentMonitorStore?
+    @State private var bgAgentStore: BackgroundAgentStore?
+    @State private var timelineStore: MemoryTimelineStore?
+    @State private var homeStore: HomeOrchestrationStore?
+
     var body: some View {
         Group {
             if let sessions = sessionStore,
                let nodes = nodeStore,
                let skills = skillsStore,
-               let client = appState.activeClient {
-                content(sessions: sessions, nodes: nodes, skills: skills, client: client)
+               let client = appState.activeClient,
+               let agentMon = agentMonitorStore,
+               let bgAgent = bgAgentStore,
+               let timeline = timelineStore,
+               let home = homeStore {
+                content(sessions: sessions, nodes: nodes, skills: skills, client: client,
+                        agentMon: agentMon, bgAgent: bgAgent, timeline: timeline, home: home)
             } else {
                 ZStack {
                     Color.clawBg.ignoresSafeArea()
@@ -48,7 +59,16 @@ struct ConnectedView: View {
     // MARK: - Content router
 
     @ViewBuilder
-    private func content(sessions: SessionStore, nodes: NodeStore, skills: SkillsStore, client: GatewayClient) -> some View {
+    private func content(
+        sessions: SessionStore,
+        nodes: NodeStore,
+        skills: SkillsStore,
+        client: GatewayClient,
+        agentMon: AgentMonitorStore,
+        bgAgent: BackgroundAgentStore,
+        timeline: MemoryTimelineStore,
+        home: HomeOrchestrationStore
+    ) -> some View {
         if let approvalStore = toolApprovalStore,
            let memStore = memoryStore,
            let cStore = cronStore {
@@ -61,6 +81,10 @@ struct ConnectedView: View {
                 .environment(cStore)
                 .environment(terminalSessionStore)
                 .environment(runbookStore)
+                .environment(agentMon)
+                .environment(bgAgent)
+                .environment(timeline)
+                .environment(home)
         } else {
             AdaptiveSessionsLayout(client: client)
                 .environment(sessions)
@@ -68,6 +92,10 @@ struct ConnectedView: View {
                 .environment(skills)
                 .environment(terminalSessionStore)
                 .environment(runbookStore)
+                .environment(agentMon)
+                .environment(bgAgent)
+                .environment(timeline)
+                .environment(home)
         }
     }
 
@@ -113,6 +141,27 @@ struct ConnectedView: View {
             runbookStore = store
             Task { try? await store.load() }
         }
+        if agentMonitorStore == nil {
+            let store = AgentMonitorStore(client: client)
+            agentMonitorStore = store
+            Task { await store.refresh() }
+        }
+        if bgAgentStore == nil {
+            let store = BackgroundAgentStore(client: client)
+            bgAgentStore = store
+            Task { await store.loadAll() }
+        }
+        if timelineStore == nil {
+            let store = MemoryTimelineStore(client: client)
+            timelineStore = store
+            Task { try? await store.reload() }
+        }
+        if homeStore == nil {
+            let store = HomeOrchestrationStore(client: client)
+            homeStore = store
+            Task { await store.loadAll() }
+        }
+        }
     }
 }
 
@@ -131,6 +180,10 @@ struct AdaptiveSessionsLayout: View {
     @Environment(ToolApprovalStore.self) private var toolApprovalStore
     @Environment(TerminalSessionStore.self) private var terminalSessionStore: TerminalSessionStore?
     @Environment(RunbookStore.self) private var runbookStore: RunbookStore?
+    @Environment(AgentMonitorStore.self) private var agentMonitorStore
+    @Environment(BackgroundAgentStore.self) private var bgAgentStore
+    @Environment(MemoryTimelineStore.self) private var timelineStore
+    @Environment(HomeOrchestrationStore.self) private var homeStore
     @State private var selectedSession: ClawSession?
     @State private var showSettings = false
     @State private var showNodes = false
@@ -272,6 +325,12 @@ struct AdaptiveSessionsLayout: View {
             // MARK: Dashboard tab
             NavigationStack {
                 DashboardTabView()
+                    .environment(appState)
+                    .environment(sessionStore)
+                    .environment(agentMonitorStore)
+                    .environment(bgAgentStore)
+                    .environment(timelineStore)
+                    .environment(homeStore)
             }
             .tabItem { Label(ClawTab.dashboard.title, systemImage: ClawTab.dashboard.systemImage) }
             .tag(ClawTab.dashboard)
@@ -285,6 +344,10 @@ struct AdaptiveSessionsLayout: View {
                     .environment(memoryStore)
                     .environment(cronStore)
                     .environment(nodeStore)
+                    .environment(agentMonitorStore)
+                    .environment(bgAgentStore)
+                    .environment(timelineStore)
+                    .environment(homeStore)
             }
             .tabItem { Label(ClawTab.more.title, systemImage: ClawTab.more.systemImage) }
             .tag(ClawTab.more)

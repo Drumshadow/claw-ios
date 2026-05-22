@@ -87,6 +87,41 @@ enum GatewayMethod {
     static let voiceCommandExecute = "voice.command.execute"
     static let shareIntakeCreate = "share.intake.create"
     static let shareIntakeStatus = "share.intake.status"
+
+    static let backgroundAgentsList = "background.agents.list"
+    static let backgroundAgentCreate = "background.agent.create"
+    static let backgroundAgentDelete = "background.agent.delete"
+    static let backgroundAgentToggle = "background.agent.toggle"
+    static let backgroundAgentAcknowledge = "background.agent.acknowledge"
+
+    static let incidentsList = "incidents.list"
+    static let incidentAcknowledge = "incident.acknowledge"
+    static let incidentResolve = "incident.resolve"
+    static let incidentAddComment = "incident.comment"
+
+    static let proposalsList = "proposals.list"
+    static let proposalApprove = "proposal.approve"
+    static let proposalReject = "proposal.reject"
+
+    static let memoryTimelineList = "memory.timeline.list"
+    static let memoryTimelineSearch = "memory.timeline.search"
+    static let memoryTimelineAdd = "memory.timeline.add"
+
+    static let sessionReplayData = "session.replay.data"
+    static let sessionBranches = "session.branches"
+
+    static let agentNetworkState = "agents.network.state"
+    static let agentNetworkSubscribe = "agents.network.subscribe"
+
+    static let homeIntegrationsList = "home.integrations.list"
+    static let homeIntegrationToggle = "home.integration.toggle"
+    static let homeIntegrationSync = "home.integration.sync"
+    static let homeReminders = "home.reminders"
+    static let homeGroceriesList = "home.groceries.list"
+    static let homeGroceriesUpdate = "home.groceries.update"
+    static let homeTasksList = "home.tasks.list"
+    static let homeTasksCreate = "home.tasks.create"
+    static let homeTasksUpdate = "home.tasks.update"
 }
 
 // MARK: - Agent IDs offered when creating sessions
@@ -154,6 +189,20 @@ enum GatewayEventName {
     static let voiceResponseDelta = "voice.response.delta"
     static let voiceResponseCompleted = "voice.response.completed"
     static let shareIntakeCompleted = "share.intake.completed"
+
+    static let backgroundAgentAlert = "background.agent.alert"
+    static let incidentCreated = "incident.created"
+    static let incidentUpdated = "incident.updated"
+    static let proposalCreated = "proposal.created"
+
+    static let memoryTimelineEvent = "memory.timeline.event"
+
+    static let agentNetworkUpdated = "agents.network.updated"
+    static let agentNetworkNodeChange = "agents.network.node.change"
+
+    static let homeIntegrationStatusChange = "home.integration.status"
+    static let homeTaskCreated = "home.task.created"
+    static let homeTaskUpdated = "home.task.updated"
 }
 
 // MARK: - Connection state enum (shared between transport + app layer)
