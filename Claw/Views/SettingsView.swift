@@ -218,6 +218,9 @@ struct SettingsView: View {
 
     // MARK: - Platform section
 
+    @State private var showPolicyEditor   = false
+    @State private var showModelRouting   = false
+
     private var platformSection: some View {
         Section {
             NavigationLink {
@@ -234,6 +237,30 @@ struct SettingsView: View {
                 GatewayConfigView()
             } label: {
                 platformRow(icon: "slider.horizontal.3", title: "Gateway Config", subtitle: "Inspect gateway settings")
+            }
+            // MARK: Safe Ops & Routing
+            Button(action: { showPolicyEditor = true }) {
+                platformRow(
+                    icon: "shield.checkered",
+                    title: "Approval Policies",
+                    subtitle: "Risk gates, biometric rules, auto-approve"
+                )
+            }
+            .buttonStyle(.plain)
+            .sheet(isPresented: $showPolicyEditor) {
+                PolicyEditorView()
+            }
+
+            Button(action: { showModelRouting = true }) {
+                platformRow(
+                    icon: "arrow.triangle.branch",
+                    title: "Model Routing",
+                    subtitle: "Local, cloud, and fallback model profiles"
+                )
+            }
+            .buttonStyle(.plain)
+            .sheet(isPresented: $showModelRouting) {
+                ModelRoutingView()
             }
         } header: {
             Text("Platform")

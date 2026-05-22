@@ -1,63 +1,17 @@
 import SwiftUI
 
+// MARK: - PolicyEditorView
+//
+// Full CRUD editor for approval policies backed by PolicyStore.
+// Policies are persisted to UserDefaults (with biometric-gated ones
+// cross-referenced in Keychain for tamper detection).
+
 struct PolicyEditorView: View {
-    @State private var policies: [ApprovalPolicy] = PolicyEditorView.defaultPolicies
+    @State private var store = PolicyStore.shared
     @State private var editingPolicy: ApprovalPolicy? = nil
     @State private var showAddPolicy = false
+    @State private var showAlwaysAllowSheet = false
     @Environment(\.dismiss) var dismiss
-
-    static let defaultPolicies: [ApprovalPolicy] = [
-        ApprovalPolicy(
-            name: "Production Database Operations",
-            environment: "production",
-            toolPattern: "db.*",
-            riskLevel: .critical,
-            autoApprove: false,
-            requireBiometric: true,
-            timeoutSeconds: 30,
-            isEnabled: true
-        ),
-        ApprovalPolicy(
-            name: "Production Deployments",
-            environment: "production",
-            toolPattern: "deploy*",
-            riskLevel: .danger,
-            autoApprove: false,
-            requireBiometric: false,
-            timeoutSeconds: 60,
-            isEnabled: true
-        ),
-        ApprovalPolicy(
-            name: "Dev Environment Restarts",
-            environment: "dev",
-            toolPattern: "docker restart *",
-            riskLevel: .caution,
-            autoApprove: true,
-            requireBiometric: false,
-            timeoutSeconds: 0,
-            isEnabled: true
-        ),
-        ApprovalPolicy(
-            name: "Staging Rollbacks",
-            environment: "staging",
-            toolPattern: "rollback*",
-            riskLevel: .danger,
-            autoApprove: false,
-            requireBiometric: false,
-            timeoutSeconds: 45,
-            isEnabled: true
-        ),
-        ApprovalPolicy(
-            name: "Read Operations (All Envs)",
-            environment: "*",
-            toolPattern: "read*",
-            riskLevel: .info,
-            autoApprove: true,
-            requireBiometric: false,
-            timeoutSeconds: 0,
-            isEnabled: true
-        ),
-    ]
 
     var body: some View {
         NavigationView {
@@ -67,74 +21,167 @@ struct PolicyEditorView: View {
                 VStack(spacing: 0) {
                     // Header
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Approval Policies")
-                            .font(.system(size: 28, weight: .bold))
-                            .foregroundColor(.white)
-
-                        Text("Configure risk levels and approval gates")
-                            .font(.system(size: 14))
-                            .foregroundColor(.white.opacity(0.6))
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Approval Policies")
+                                    .font(.system(size: 28, weight: .bold))
+                                    .foregroundColor(.white)
+                                Text("Configure risk levels and approval gates")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.white.opacity(0.6))
+                            }
+                            Spacer()
+                            // Policy count badge
+                            Text("\(store.policies.count)")
+                                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Capsule().fill(Color.white.opacity(0.15)))
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
+                    .padding(.horizontal)
+                    .padding(.top, 16)
+                    .padding(.bottom, 12)
+
+                    // Engine health summary
+                    PolicyEngineStatusBanner(policies: store.policies)
+                        .padding(.horizontal)
+                        .padding(.bottom, 12)
 
                     // Policy list
-                    if policies.isEmpty {
+                    if store.policies.isEmpty {
                         emptyStateView
                     } else {
-                        ScrollView {
-                            LazyVStack(spacing: 12) {
-                                ForEach(policies) { policy in
-                                    PolicyRowView(policy: policy)
-                                        .onTapGesture {
-                                            editingPolicy = policy
+                        List {
+                            ForEach(store.policies) { policy in
+                                PolicyRowView(policy: policy)
+                                    .listRowBackground(Color.clear)
+                                    .listRowInsets(.init(top: 4, leading: 16, bottom: 4, trailing: 16))
+                                    .listRowSeparator(.hidden)
+                                    .onTapGesture { editingPolicy = policy }
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                        Button(role: .destructive) {
+                                            store.delete(policy)
+                                        } label: {
+                                            Label("Delete", systemImage: "trash")
                                         }
-                                        .contextMenu {
-                                            Button(role: .destructive) {
-                                                deletePolicy(policy)
-                                            } label: {
-                                                Label("Delete", systemImage: "trash")
-                                            }
+                                    }
+                                    .swipeActions(edge: .leading) {
+                                        Button {
+                                            store.duplicate(policy)
+                                        } label: {
+                                            Label("Duplicate", systemImage: "doc.on.doc")
+                                        }
+                                        .tint(.blue)
 
-                                            Button {
-                                                duplicatePolicy(policy)
-                                            } label: {
-                                                Label("Duplicate", systemImage: "doc.on.doc")
-                                            }
+                                        Button {
+                                            store.setEnabled(policy.id, enabled: !policy.isEnabled)
+                                        } label: {
+                                            Label(
+                                                policy.isEnabled ? "Disable" : "Enable",
+                                                systemImage: policy.isEnabled ? "pause.circle" : "play.circle"
+                                            )
                                         }
-                                }
+                                        .tint(policy.isEnabled ? .orange : .green)
+                                    }
+                                    .contextMenu {
+                                        Button {
+                                            editingPolicy = policy
+                                        } label: {
+                                            Label("Edit", systemImage: "pencil")
+                                        }
+
+                                        Button {
+                                            store.duplicate(policy)
+                                        } label: {
+                                            Label("Duplicate", systemImage: "doc.on.doc")
+                                        }
+
+                                        Button {
+                                            store.setEnabled(policy.id, enabled: !policy.isEnabled)
+                                        } label: {
+                                            Label(
+                                                policy.isEnabled ? "Disable" : "Enable",
+                                                systemImage: policy.isEnabled ? "pause.circle" : "play.circle"
+                                            )
+                                        }
+
+                                        if policy.requireBiometric {
+                                            Divider()
+                                            Label(
+                                                store.isVerifiedSensitive(policy.id) ? "Keychain: Verified ✓" : "Keychain: NOT indexed ⚠",
+                                                systemImage: "key.fill"
+                                            )
+                                            .foregroundColor(store.isVerifiedSensitive(policy.id) ? .green : .red)
+                                        }
+
+                                        Divider()
+
+                                        Button(role: .destructive) {
+                                            store.delete(policy)
+                                        } label: {
+                                            Label("Delete", systemImage: "trash")
+                                        }
+                                    }
                             }
-                            .padding()
+                            .onMove { from, to in
+                                store.reorder(fromOffsets: from, toOffset: to)
+                            }
+
+                            // Always-allow section
+                            Section {
+                                Button(action: { showAlwaysAllowSheet = true }) {
+                                    HStack {
+                                        Image(systemName: "checkmark.shield.fill")
+                                            .foregroundColor(.green)
+                                        Text("Always-Allow List")
+                                            .foregroundColor(.white)
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .foregroundColor(.white.opacity(0.4))
+                                            .font(.system(size: 12))
+                                    }
+                                    .padding(.vertical, 4)
+                                }
+                                .listRowBackground(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color.green.opacity(0.08))
+                                        .padding(.vertical, 2)
+                                )
+                            }
+                            .listRowInsets(.init(top: 4, leading: 16, bottom: 4, trailing: 16))
+                            .listRowSeparator(.hidden)
                         }
+                        .listStyle(.plain)
+                        .scrollContentBackground(.hidden)
                     }
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Close") {
-                        dismiss()
-                    }
-                    .foregroundColor(.white)
+                    Button("Close") { dismiss() }
+                        .foregroundColor(.white)
                 }
 
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { showAddPolicy = true }) {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 20))
-                            .foregroundColor(.white)
+                    HStack(spacing: 12) {
+                        EditButton()
+                            .foregroundColor(.white.opacity(0.7))
+                        Button(action: { showAddPolicy = true }) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 20))
+                                .foregroundColor(.white)
+                        }
                     }
                 }
             }
             .sheet(item: $editingPolicy) { policy in
-                PolicyEditSheet(
-                    policy: policy,
-                    onSave: { updated in
-                        if let index = policies.firstIndex(where: { $0.id == policy.id }) {
-                            policies[index] = updated
-                        }
-                    }
-                )
+                PolicyEditSheet(policy: policy) { updated in
+                    store.update(updated)
+                }
             }
             .sheet(isPresented: $showAddPolicy) {
                 PolicyEditSheet(
@@ -147,11 +194,13 @@ struct PolicyEditorView: View {
                         requireBiometric: false,
                         timeoutSeconds: 30,
                         isEnabled: true
-                    ),
-                    onSave: { newPolicy in
-                        policies.append(newPolicy)
-                    }
-                )
+                    )
+                ) { newPolicy in
+                    store.add(newPolicy)
+                }
+            }
+            .sheet(isPresented: $showAlwaysAllowSheet) {
+                AlwaysAllowSheet()
             }
         }
     }
@@ -170,21 +219,194 @@ struct PolicyEditorView: View {
                 .font(.system(size: 14))
                 .foregroundColor(.white.opacity(0.6))
                 .multilineTextAlignment(.center)
+
+            Button(action: { showAddPolicy = true }) {
+                Label("Add Policy", systemImage: "plus.circle.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(Capsule().fill(Color.clawAccent.opacity(0.8)))
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func deletePolicy(_ policy: ApprovalPolicy) {
-        policies.removeAll { $0.id == policy.id }
-    }
-
-    private func duplicatePolicy(_ policy: ApprovalPolicy) {
-        var duplicate = policy
-        duplicate.id = UUID()
-        duplicate.name = "\(policy.name) (Copy)"
-        policies.append(duplicate)
+        .padding()
     }
 }
+
+// MARK: - PolicyEngineStatusBanner
+
+private struct PolicyEngineStatusBanner: View {
+    let policies: [ApprovalPolicy]
+
+    var activeCount: Int  { policies.filter(\.isEnabled).count }
+    var criticalCount: Int { policies.filter { $0.isEnabled && $0.riskLevel == .critical }.count }
+    var autoApproveCount: Int { policies.filter { $0.isEnabled && $0.autoApprove }.count }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            BannerStat(value: "\(activeCount)", label: "Active", color: .green)
+            Divider().frame(height: 24).background(Color.white.opacity(0.15))
+            BannerStat(value: "\(criticalCount)", label: "Critical", color: .red)
+            Divider().frame(height: 24).background(Color.white.opacity(0.15))
+            BannerStat(value: "\(autoApproveCount)", label: "Auto-OK", color: .cyan)
+        }
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color.white.opacity(0.06))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                )
+        )
+    }
+
+    private struct BannerStat: View {
+        let value: String
+        let label: String
+        let color: Color
+        var body: some View {
+            VStack(spacing: 2) {
+                Text(value)
+                    .font(.system(size: 18, weight: .bold, design: .monospaced))
+                    .foregroundColor(color)
+                Text(label)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.white.opacity(0.5))
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+}
+
+// MARK: - AlwaysAllowSheet
+//
+// Manages the Keychain-backed list of tools that skip approval entirely.
+
+struct AlwaysAllowSheet: View {
+    @State private var approvalStore: ToolApprovalStore? = nil
+    @State private var newTool: String = ""
+    @Environment(\.dismiss) var dismiss
+
+    // We read the always-allow list from a local viewmodel since we need
+    // an active ToolApprovalStore reference. Show empty state if none.
+    @State private var toolList: [String] = []
+
+    var body: some View {
+        NavigationView {
+            ZStack {
+                Color.black.ignoresSafeArea()
+
+                VStack(spacing: 0) {
+                    // Warning banner
+                    HStack(spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.yellow)
+                        Text("Tools in this list bypass approval entirely. Use with caution.")
+                            .font(.system(size: 13))
+                            .foregroundColor(.yellow.opacity(0.9))
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.yellow.opacity(0.1))
+                    .overlay(
+                        Rectangle().frame(height: 1).foregroundColor(.yellow.opacity(0.2)),
+                        alignment: .bottom
+                    )
+
+                    // Add new
+                    HStack(spacing: 8) {
+                        Image(systemName: "terminal")
+                            .foregroundColor(.white.opacity(0.5))
+                            .font(.system(size: 14))
+                        TextField("tool.name or pattern*", text: $newTool)
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundColor(.white)
+                            .autocapitalization(.none)
+                        Button(action: addTool) {
+                            Image(systemName: "plus.circle.fill")
+                                .foregroundColor(newTool.isEmpty ? .white.opacity(0.3) : .green)
+                                .font(.system(size: 20))
+                        }
+                        .disabled(newTool.isEmpty)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Color.white.opacity(0.06))
+
+                    if toolList.isEmpty {
+                        VStack(spacing: 12) {
+                            Image(systemName: "checkmark.shield")
+                                .font(.system(size: 48))
+                                .foregroundColor(.white.opacity(0.2))
+                            Text("No always-allowed tools")
+                                .foregroundColor(.white.opacity(0.5))
+                                .font(.system(size: 15))
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        List {
+                            ForEach(toolList, id: \.self) { tool in
+                                HStack {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(.green)
+                                        .font(.system(size: 14))
+                                    Text(tool)
+                                        .font(.system(.body, design: .monospaced))
+                                        .foregroundColor(.white)
+                                    Spacer()
+                                }
+                                .listRowBackground(Color.white.opacity(0.06))
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button(role: .destructive) {
+                                        removeTool(tool)
+                                    } label: {
+                                        Label("Remove", systemImage: "trash")
+                                    }
+                                }
+                            }
+                        }
+                        .listStyle(.plain)
+                        .scrollContentBackground(.hidden)
+                    }
+                }
+            }
+            .navigationTitle("Always-Allow List")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .foregroundColor(.white)
+                }
+            }
+        }
+    }
+
+    private func addTool() {
+        let trimmed = newTool.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !toolList.contains(trimmed) else { return }
+        toolList.append(trimmed)
+        toolList.sort()
+        newTool = ""
+        // Persist: in a real app this delegates to ToolApprovalStore.alwaysAllow()
+        // We store directly to Keychain here since we may not have the store ref.
+        syncToKeychain()
+    }
+
+    private func removeTool(_ tool: String) {
+        toolList.removeAll { $0 == tool }
+        syncToKeychain()
+    }
+
+    private func syncToKeychain() {
+        guard let data = try? JSONEncoder().encode(toolList) else { return }
+        try? KeychainStore.save(key: "claw.toolAlwaysAllow", data: data)
+    }
+}
+
+// MARK: - PolicyRowView
 
 struct PolicyRowView: View {
     let policy: ApprovalPolicy
@@ -270,12 +492,11 @@ struct StatusBadge: View {
             .foregroundColor(color)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
-            .background(
-                Capsule()
-                    .fill(color.opacity(0.15))
-            )
+            .background(Capsule().fill(color.opacity(0.15)))
     }
 }
+
+// MARK: - PolicyEditSheet
 
 struct PolicyEditSheet: View {
     @State var policy: ApprovalPolicy
@@ -294,7 +515,7 @@ struct PolicyEditSheet: View {
                         .autocapitalization(.none)
                 }
 
-                Section("Risk Level") {
+                Section(header: Text("Risk Level"), footer: Text("'Critical' always requires biometric confirmation.")) {
                     Picker("Risk Level", selection: $policy.riskLevel) {
                         ForEach(RiskLevel.allCases, id: \.self) { level in
                             HStack {
@@ -306,7 +527,7 @@ struct PolicyEditSheet: View {
                     }
                 }
 
-                Section("Approval Settings") {
+                Section(header: Text("Approval Settings"), footer: Text("Auto-approve bypasses the review prompt entirely. Use only for low-risk, high-confidence patterns.")) {
                     Toggle("Auto-approve", isOn: $policy.autoApprove)
                     Toggle("Require Biometric", isOn: $policy.requireBiometric)
 
@@ -328,9 +549,7 @@ struct PolicyEditSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
+                    Button("Cancel") { dismiss() }
                 }
 
                 ToolbarItem(placement: .confirmationAction) {

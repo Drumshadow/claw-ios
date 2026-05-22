@@ -58,22 +58,16 @@ enum GatewayMethod {
     // Usage methods
     static let usageCost = "usage.cost"
 
-    // Tool approval methods
+    // Tool approval / safe-ops methods
     static let toolsApprove = "tools.approve"
     static let toolsDeny = "tools.deny"
+    static let toolsSimulate = "tools.simulate"
+    static let toolsRollback = "tools.rollback"
 
     // Phone context bridge methods
     static let phoneResponse = "phone.response"
 
     // Terminal stream methods
-    // Expected backend contract:
-    //   terminal.sessions.list → [TerminalSessionPayload]
-    //   terminal.session.subscribe(sessionId: String) → void, starts terminal.output events
-    //   terminal.session.unsubscribe(sessionId: String) → void
-    //   terminal.session.history(sessionId: String, limit: Int, offset: Int) → [TerminalLinePayload]
-    //   terminal.session.input(sessionId: String, text: String) → void (Take Control mode)
-    //   terminal.session.resize(sessionId: String, cols: Int, rows: Int) → void
-    //   terminal.session.kill(sessionId: String) → void
     static let terminalSessionsList = "terminal.sessions.list"
     static let terminalSessionSubscribe = "terminal.session.subscribe"
     static let terminalSessionUnsubscribe = "terminal.session.unsubscribe"
@@ -83,14 +77,6 @@ enum GatewayMethod {
     static let terminalSessionKill = "terminal.session.kill"
 
     // Runbook methods
-    // Expected backend contract:
-    //   runbooks.list → [RunbookPayload]
-    //   runbooks.execute(runbookId: String, mode: String, dryRun: Bool) → RunbookExecutionPayload
-    //   runbooks.execution.status(executionId: String) → RunbookExecutionPayload
-    //   runbooks.execution.approve(executionId: String, stepId: String) → void
-    //   runbooks.execution.deny(executionId: String, stepId: String, reason: String?) → void
-    //   runbooks.execution.abort(executionId: String) → void
-    //   runbooks.execution.rollback(executionId: String, stepId: String?) → void (nil = full rollback)
     static let runbooksList = "runbooks.list"
     static let runbooksExecute = "runbooks.execute"
     static let runbooksExecutionStatus = "runbooks.execution.status"
@@ -100,11 +86,15 @@ enum GatewayMethod {
     static let runbooksExecutionRollback = "runbooks.execution.rollback"
 
     // Topology / Infrastructure graph methods
-    // Expected gateway contract:
-    //   topology.snapshot  → { nodes: [...], edges: [...], incidents: [...], deployments: [...], snapshotAt: ISO8601, version: Int }
-    //   topology.subscribe → acknowledge (starts topology.* event stream)
     static let topologySnapshot = "topology.snapshot"
     static let topologySubscribe = "topology.subscribe"
+
+    // Model routing methods
+    static let modelsList = "models.list"
+    static let modelsCapabilities = "models.capabilities"
+    static let routingGet = "routing.get"
+    static let routingSet = "routing.set"
+    static let routingProfiles = "routing.profiles"
 }
 
 // MARK: - Agent IDs offered when creating sessions
@@ -164,6 +154,15 @@ enum GatewayEventName {
     static let topologyIncidentOpened = "topology.incident.opened"
     static let topologyIncidentClosed = "topology.incident.closed"
     static let topologyDeploymentUpdated = "topology.deployment.updated"
+
+    // Model routing events
+    static let modelRoutingChanged = "model.routing.changed"
+    static let modelHealthUpdate = "model.health.update"
+
+    // Safe-ops events
+    static let snapshotCaptured = "snapshot.captured"
+    static let snapshotExpired = "snapshot.expired"
+    static let rollbackCompleted = "rollback.completed"
 }
 
 // MARK: - Connection state enum (shared between transport + app layer)

@@ -24,6 +24,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         UNUserNotificationCenter.current().delegate = notificationDelegate
         // Register BGTaskScheduler handler for SSH health checks.
         HealthCheckScheduler.registerBackgroundTask()
+        // Activate WatchConnectivity bridge so it's ready before any tool approvals arrive.
+        PhoneWatchBridge.shared.activate()
         return true
     }
 

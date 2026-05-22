@@ -9,11 +9,21 @@ struct ToolApprovalRequest: Identifiable {
     let toolInput: [String: JSONValue]
     let nodeId: String?
     let isDestructive: Bool
+    let environment: String
+
+    // Evaluated by PolicyEngine when request arrives
+    let matchedPolicy: ApprovalPolicy?
+    let riskLevel: RiskLevel
+
+    // Associated rollback snapshot (registered on creation when risk >= .danger)
+    let snapshotId: UUID?
 }
 
 // MARK: - ToolApprovalStore
 
 /// Listens for tool.approval_required events and manages pending approvals.
+/// Integrates with PolicyStore for risk evaluation, RollbackSnapshotStore
+/// for pre-execution checkpoints, and WatchConnectivity via PhoneWatchBridge.
 @Observable
 @MainActor
 final class ToolApprovalStore {
@@ -51,6 +61,12 @@ final class ToolApprovalStore {
     // MARK: - Approve / Deny
 
     func approve(id: String) {
+        // Mark any associated snapshot as executed
+        if let approval = pendingApprovals.first(where: { $0.id == id }),
+           let snapshotId = approval.snapshotId {
+            RollbackSnapshotStore.shared.markExecuted(id)
+            _ = snapshotId // referenced to avoid warning — snapshot tracking by approvalId
+        }
         pendingApprovals.removeAll { $0.id == id }
         Task {
             struct ApproveParams: Encodable { let approvalId: String }
@@ -64,6 +80,17 @@ final class ToolApprovalStore {
             struct DenyParams: Encodable { let approvalId: String }
             _ = try? await client.send(method: GatewayMethod.toolsDeny, params: DenyParams(approvalId: id))
         }
+    }
+
+    // MARK: - Rollback
+
+    func rollback(approvalId: String) {
+        guard let approval = pendingApprovals.first(where: { $0.id == approvalId }) ??
+              nil else { return }
+        // Find the snapshot for this approval
+        let snapshot = RollbackSnapshotStore.shared.snapshots.first { $0.approvalId == approvalId }
+        guard let snapshot else { return }
+        RollbackSnapshotStore.shared.requestRollback(snapshot, client: client)
     }
 
     // MARK: - Always Allow
@@ -83,6 +110,10 @@ final class ToolApprovalStore {
 
     func isAlwaysAllowed(_ toolName: String) -> Bool {
         ensureAlwaysAllowCache().contains(toolName)
+    }
+
+    var alwaysAllowedTools: [String] {
+        Array(ensureAlwaysAllowCache()).sorted()
     }
 
     // MARK: - Private: Keychain-backed always-allow persistence
@@ -120,12 +151,25 @@ final class ToolApprovalStore {
     }
 
     private func handleEvent(_ event: GatewayEvent) {
-        guard event.name == "tool.approval_required" else { return }
-        let payload = event.payload
+        switch event.name {
+        case "tool.approval_required":
+            handleApprovalRequired(event.payload)
 
-        guard let idVal = payload["approvalId"], case .string(let approvalId) = idVal, !approvalId.isEmpty,
-              let skVal = payload["sessionKey"], case .string(let sessionKey) = skVal,
-              let tnVal = payload["toolName"], case .string(let toolName) = tnVal
+        case GatewayEventName.snapshotCaptured:
+            handleSnapshotCaptured(event.payload)
+
+        case GatewayEventName.rollbackCompleted:
+            handleRollbackCompleted(event.payload)
+
+        default:
+            break
+        }
+    }
+
+    private func handleApprovalRequired(_ payload: [String: JSONValue]) {
+        guard let idVal  = payload["approvalId"], case .string(let approvalId) = idVal, !approvalId.isEmpty,
+              let skVal  = payload["sessionKey"],  case .string(let sessionKey) = skVal,
+              let tnVal  = payload["toolName"],    case .string(let toolName) = tnVal
         else { return }
 
         let toolInput: [String: JSONValue]
@@ -149,6 +193,13 @@ final class ToolApprovalStore {
             isDestructive = false
         }
 
+        let environment: String
+        if let envVal = payload["environment"], case .string(let env) = envVal, !env.isEmpty {
+            environment = env
+        } else {
+            environment = "unknown"
+        }
+
         // Auto-approve if tool is in always-allow list
         if isAlwaysAllowed(toolName) {
             Task {
@@ -158,14 +209,71 @@ final class ToolApprovalStore {
             return
         }
 
+        // Evaluate via PolicyEngine
+        let engine = PolicyStore.shared.engine
+        let (matchedPolicy, riskLevel) = engine.evaluate(tool: toolName, environment: environment)
+
+        // Auto-approve if policy says so (and not destructive override)
+        if let policy = matchedPolicy, policy.autoApprove, !isDestructive {
+            Task {
+                struct ApproveParams: Encodable { let approvalId: String }
+                _ = try? await client.send(method: GatewayMethod.toolsApprove, params: ApproveParams(approvalId: approvalId))
+            }
+            return
+        }
+
+        // Register rollback snapshot for danger/critical operations
+        var snapshotId: UUID? = nil
+        if riskLevel >= .danger {
+            let inputSummary = toolInput.prefix(3).map { "\($0.key)=\($0.value)" }.joined(separator: ", ")
+            let snapshot = RollbackSnapshotStore.shared.register(
+                approvalId: approvalId,
+                sessionKey: sessionKey,
+                toolName: toolName,
+                toolInputSummary: inputSummary,
+                environment: environment,
+                ttlSeconds: matchedPolicy?.timeoutSeconds.flatMap { $0 > 0 ? $0 * 10 : nil } ?? 3600
+            )
+            snapshotId = snapshot.id
+        }
+
         let request = ToolApprovalRequest(
             id: approvalId,
             sessionKey: sessionKey,
             toolName: toolName,
             toolInput: toolInput,
             nodeId: nodeId,
-            isDestructive: isDestructive
+            isDestructive: isDestructive,
+            environment: environment,
+            matchedPolicy: matchedPolicy,
+            riskLevel: riskLevel,
+            snapshotId: snapshotId
         )
         pendingApprovals.append(request)
+
+        // Push to Watch
+        PhoneWatchBridge.shared.sendApprovalRequest(request)
+    }
+
+    private func handleSnapshotCaptured(_ payload: [String: JSONValue]) {
+        guard let approvalId = payload["approvalId"]?.stringValue,
+              let serverRef  = payload["snapshotRef"]?.stringValue
+        else { return }
+
+        let resources = payload["resources"]?.arrayValue?.compactMap(\.stringValue) ?? []
+        let impact    = payload["impactSummary"]?.stringValue
+
+        // Find our local snapshot record
+        if let snapshot = RollbackSnapshotStore.shared.snapshots.first(where: { $0.approvalId == approvalId }) {
+            RollbackSnapshotStore.shared.markCaptured(snapshot.id, serverRef: serverRef, resources: resources, impact: impact)
+        }
+    }
+
+    private func handleRollbackCompleted(_ payload: [String: JSONValue]) {
+        guard let approvalId = payload["approvalId"]?.stringValue else { return }
+        let notes = payload["notes"]?.stringValue
+        if let snapshot = RollbackSnapshotStore.shared.snapshots.first(where: { $0.approvalId == approvalId }) {
+            RollbackSnapshotStore.shared.markRolledBack(snapshot.id, notes: notes)
+        }
     }
 }

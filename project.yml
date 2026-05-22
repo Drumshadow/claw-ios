@@ -41,6 +41,8 @@ targets:
         product: Citadel
       - sdk: BackgroundTasks.framework
         embed: false
+      - sdk: WatchConnectivity.framework
+        embed: false
     info:
       path: Claw/Info.plist
       properties:
@@ -117,6 +119,8 @@ targets:
     dependencies:
       - package: ClawShared
         product: ClawShared
+      - sdk: WatchConnectivity.framework
+        embed: false
     info:
       path: ClawWatch/Info.plist
       properties:
@@ -124,3 +128,8 @@ targets:
         CFBundleShortVersionString: "1.0.0"
         CFBundleVersion: "1"
         WKCompanionAppBundleIdentifier: ai.clawos.app
+        # Background modes for Watch: allows receiving WCSession transfers
+        # while the Watch app is not in the foreground.
+        UIBackgroundModes:
+          - background-app-refresh
+          - watchkit-background-fetch
