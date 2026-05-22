@@ -136,7 +136,7 @@ struct RunbookListView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 32))
                 .foregroundStyle(Color.clawMuted.opacity(0.4))
-            Text("No results for "\(searchText)"")
+            Text("No results for \"\(searchText)\"")
                 .font(.subheadline)
                 .foregroundStyle(Color.clawMuted)
         }

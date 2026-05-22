@@ -59,7 +59,7 @@ struct VoiceConfirmationView: View {
                         .foregroundStyle(.white)
 
                     // Original transcript
-                    Text(""\(intent.rawTranscript)"")
+                    Text("\"\(intent.rawTranscript)\"")
                         .font(.title3)
                         .foregroundStyle(.white.opacity(0.8))
                         .multilineTextAlignment(.center)
@@ -116,7 +116,7 @@ struct VoiceConfirmationView: View {
                 }
 
                 // Voice hint
-                Text("Or say "yes" to confirm, "cancel" to abort")
+                Text("Or say \"yes\" to confirm, \"cancel\" to abort")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.4))
                     .multilineTextAlignment(.center)

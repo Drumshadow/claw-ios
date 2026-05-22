@@ -97,7 +97,7 @@ struct BackgroundAgentDetailView: View {
             }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text(""\(watcher.name)" will be permanently removed.")
+            Text("\"\(watcher.name)\" will be permanently removed.")
         }
     }
 }

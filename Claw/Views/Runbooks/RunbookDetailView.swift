@@ -283,7 +283,7 @@ struct RunbookDetailView: View {
 
         if needsBiometric {
             let ok = await BiometricGuard.shared.authenticate(
-                reason: "Authenticate to launch "\(runbook.name)" in production"
+                reason: "Authenticate to launch \"\(runbook.name)\" in production"
             )
             guard ok else {
                 showBiometricDenied = true
