@@ -1,32 +1,43 @@
 import SwiftUI
 
+// MARK: - VoiceOpsOverlay
+
+/// Modal overlay for voice operations — appears as a sheet over the current view.
+///
+/// Integrates with VoiceSessionBridge for live agent sends when client+sessionKey
+/// are provided. Falls back to a plain transcript callback when omitted.
 struct VoiceOpsOverlay: View {
     @Bindable var manager: VoiceOpsManager
+    var client: GatewayClient?
+    var sessionKey: String?
+    /// Called with the transcript if no bridge is configured (compose-mode callback).
+    var onTranscript: ((String) -> Void)?
     var onDismiss: () -> Void
+
+    @State private var bridge: VoiceSessionBridge?
+    @State private var bridgeStatus: String = ""
+    @State private var isBridgeActive: Bool = false
+    @State private var pendingConfirmation: VoiceCommandIntent?
+    @State private var showConfirmation: Bool = false
 
     @State private var waveformHeights: [CGFloat] = [0.3, 0.5, 0.8, 0.5, 0.3]
     @State private var waveformTimer: Timer?
 
     var body: some View {
         ZStack {
-            // Dark background overlay
-            Color.clawBg.opacity(0.95)
+            Color.clawBg.opacity(0.97)
                 .ignoresSafeArea()
                 .onTapGesture {
-                    if manager.isRecording {
-                        manager.stopRecording()
-                    }
+                    if manager.isRecording { manager.stopRecording() }
                     onDismiss()
                 }
 
             VStack(spacing: 40) {
                 Spacer()
 
-                // Central recording button with waveform
+                // Mic button + waveform
                 VStack(spacing: 32) {
-                    // Large circular button
                     ZStack {
-                        // Outer pulsing ring
                         Circle()
                             .stroke(
                                 LinearGradient(
@@ -37,9 +48,9 @@ struct VoiceOpsOverlay: View {
                                 lineWidth: 4
                             )
                             .frame(width: 120, height: 120)
-                            .opacity(manager.isRecording ? 0.6 : 0.3)
+                            .opacity(manager.isRecording ? 0.7 : 0.3)
+                            .animation(.easeInOut(duration: 0.3), value: manager.isRecording)
 
-                        // Filled circle with gradient
                         Circle()
                             .fill(
                                 LinearGradient(
@@ -50,13 +61,12 @@ struct VoiceOpsOverlay: View {
                             )
                             .frame(width: 120, height: 120)
 
-                        // Microphone icon
-                        Image(systemName: manager.isRecording ? "mic.fill" : "mic")
+                        Image(systemName: overlayIcon)
                             .font(.system(size: 48))
                             .foregroundStyle(.white)
+                            .animation(.easeInOut(duration: 0.2), value: overlayIcon)
                     }
 
-                    // Waveform visualization
                     if manager.isRecording {
                         HStack(spacing: 8) {
                             ForEach(0..<5, id: \.self) { index in
@@ -64,49 +74,51 @@ struct VoiceOpsOverlay: View {
                                     .fill(Color.clawTeal)
                                     .frame(width: 6, height: 60 * waveformHeights[index])
                                     .animation(
-                                        .easeInOut(duration: 0.3)
-                                        .repeatForever(autoreverses: true),
+                                        .easeInOut(duration: 0.3).repeatForever(autoreverses: true),
                                         value: waveformHeights[index]
                                     )
                             }
                         }
                         .frame(height: 60)
-                        .onAppear {
-                            startWaveformAnimation()
-                        }
-                        .onDisappear {
-                            stopWaveformAnimation()
-                        }
+                        .onAppear  { startWaveformAnimation() }
+                        .onDisappear { stopWaveformAnimation() }
                     }
                 }
 
                 Spacer()
 
-                // Live transcript
+                // Transcript + status
                 VStack(spacing: 16) {
                     if manager.isRecording {
-                        Text(manager.liveTranscript.isEmpty ? "Listening..." : manager.liveTranscript)
+                        Text(manager.liveTranscript.isEmpty ? "Listening…" : manager.liveTranscript)
                             .font(.title3)
                             .foregroundStyle(.white)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 32)
                             .frame(maxWidth: .infinity)
-                            .frame(minHeight: 100)
+                            .frame(minHeight: 80)
                     } else if case .processing = manager.state {
-                        Text("Processing...")
+                        Text("Processing…")
                             .font(.title3)
                             .foregroundStyle(.white.opacity(0.7))
+                    } else if case .speaking = manager.state {
+                        Text("Playing response…")
+                            .font(.title3)
+                            .foregroundStyle(Color.clawTeal)
                     }
 
-                    // Hint text
-                    Text(manager.isRecording ? "Tap anywhere to stop" : "")
+                    if !bridgeStatus.isEmpty && !manager.isRecording {
+                        VoiceStatusBar(status: bridgeStatus, isActive: isBridgeActive)
+                    }
+
+                    Text(overlayHint)
                         .font(.caption)
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(.white.opacity(0.4))
                 }
                 .padding(.bottom, 60)
             }
 
-            // Swipe down to cancel gesture indicator
+            // Dismiss indicator
             VStack {
                 HStack {
                     Spacer()
@@ -123,15 +135,115 @@ struct VoiceOpsOverlay: View {
             DragGesture(minimumDistance: 50, coordinateSpace: .local)
                 .onEnded { value in
                     if value.translation.height > 0 {
-                        // Swipe down to cancel
-                        if manager.isRecording {
-                            manager.cancelRecording()
-                        }
+                        if manager.isRecording { manager.cancelRecording() }
                         onDismiss()
                     }
                 }
         )
+        .sheet(isPresented: $showConfirmation) {
+            if let intent = pendingConfirmation {
+                VoiceConfirmationView(
+                    intent: intent,
+                    onConfirm: {
+                        showConfirmation = false
+                        pendingConfirmation = nil
+                        bridge?.confirmPendingIntent()
+                        manager.exitConfirmationPending()
+                    },
+                    onCancel: {
+                        showConfirmation = false
+                        pendingConfirmation = nil
+                        bridge?.cancelPendingIntent()
+                        manager.exitConfirmationPending()
+                    }
+                )
+                .presentationDetents([.large])
+                .presentationBackground(Color.clawBg)
+            }
+        }
+        .onAppear {
+            setupBridgeAndCallbacks()
+            if !manager.hasPermission, case .idle = manager.state {
+                Task {
+                    await manager.requestPermissions()
+                    if manager.hasPermission { manager.startRecording() }
+                }
+            } else if manager.hasPermission {
+                manager.startRecording()
+            }
+        }
+        .onDisappear {
+            if manager.isRecording { manager.cancelRecording() }
+            stopWaveformAnimation()
+        }
     }
+
+    // MARK: - Setup (closure-based, no weak struct references)
+
+    private func setupBridgeAndCallbacks() {
+        if let client, let sessionKey {
+            let b = VoiceSessionBridge(client: client, sessionKey: sessionKey)
+
+            b.onResponse = { response in
+                isBridgeActive = false
+                manager.speak(response)
+            }
+
+            b.onConfirmationRequired = { intent in
+                pendingConfirmation = intent
+                manager.enterConfirmationPending(for: intent)
+                if let prompt = intent.confirmationPrompt {
+                    manager.speak(prompt)
+                }
+                showConfirmation = true
+            }
+
+            b.onStatusChange = { status in
+                bridgeStatus = status
+                isBridgeActive = (
+                    status != "Done" &&
+                    status != "Cancelled" &&
+                    !status.hasPrefix("Send failed")
+                )
+            }
+
+            b.onError = { _ in
+                isBridgeActive = false
+            }
+
+            bridge = b
+        }
+
+        manager.onTranscriptReady = { transcript in
+            if let bridge {
+                bridge.processTranscript(transcript)
+                isBridgeActive = true
+            } else {
+                onTranscript?(transcript)
+            }
+        }
+    }
+
+    // MARK: - View helpers
+
+    private var overlayIcon: String {
+        switch manager.state {
+        case .recording:          return "mic.fill"
+        case .speaking:           return "speaker.wave.2.fill"
+        case .processing:         return "ellipsis"
+        case .confirmationNeeded: return "exclamationmark.triangle.fill"
+        default:                  return "mic"
+        }
+    }
+
+    private var overlayHint: String {
+        if manager.isRecording                    { return "Tap anywhere to stop" }
+        if case .speaking = manager.state         { return "Listening for response" }
+        if bridge != nil                          { return "Connected to session" }
+        return ""
+    }
+
+    // MARK: - Waveform animation
 
     private func startWaveformAnimation() {
         waveformTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { _ in
@@ -147,23 +259,8 @@ struct VoiceOpsOverlay: View {
     }
 }
 
-#Preview("Recording") {
-    let manager = VoiceOpsManager()
-    VoiceOpsOverlay(
-        manager: manager,
-        onDismiss: {}
-    )
-    .onAppear {
-        Task {
-            await manager.requestPermissions()
-            manager.startRecording()
-        }
-    }
-}
+// MARK: - Previews
 
 #Preview("Idle") {
-    VoiceOpsOverlay(
-        manager: VoiceOpsManager(),
-        onDismiss: {}
-    )
+    VoiceOpsOverlay(manager: VoiceOpsManager(), onDismiss: {})
 }

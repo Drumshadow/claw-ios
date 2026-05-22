@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- App Group allows share extension to write to the shared intake queue
+	     that the main app reads. Must match the group ID in ShareIntakeQueue.swift.
+	     Register this group ID in the Apple Developer portal and enable the
+	     App Groups capability for both the main app and this extension target. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.ai.clawos.shared</string>
+	</array>
+</dict>
+</plist>

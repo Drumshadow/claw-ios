@@ -38,7 +38,30 @@ final class NavigationRouter {
     var dashboardPath = NavigationPath()
     var morePath = NavigationPath()
 
+    // MARK: - Share intake presentation
+
+    /// Pending share intake items waiting for user action.
+    /// Populated when the app opens via claw://share deep link.
+    var pendingShareItems: [ShareIntakeItem] = []
+    var showShareIntake: Bool = false
+
+    // MARK: - Voice driving mode (global — accessible from any tab)
+
+    var showGlobalVoiceDriving: Bool = false
+
+    // MARK: - Navigation helpers
+
     func switchTo(_ tab: ClawTab) {
         selectedTab = tab
+    }
+
+    /// Present pending share items from the App Group queue.
+    func presentPendingShares() {
+        let queue = ShareIntakeQueue.shared
+        queue.reloadFromDisk()
+        let pending = queue.pendingItems
+        guard !pending.isEmpty else { return }
+        pendingShareItems = pending
+        showShareIntake = true
     }
 }

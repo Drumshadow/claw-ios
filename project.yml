@@ -31,8 +31,11 @@ targets:
       path: Claw/Claw.entitlements
       properties:
         aps-environment: development
+        com.apple.security.application-groups:
+          - group.ai.clawos.shared
     dependencies:
       - target: ClawWidgets
+      - target: ClawShareExtension
       - package: ClawShared
         product: ClawShared
       - package: MarkdownUI
@@ -87,6 +90,32 @@ targets:
           - CFBundleURLName: ai.clawos.oauth
             CFBundleURLSchemes:
               - claw
+
+  ClawShareExtension:
+    type: app-extension
+    platform: iOS
+    # Extension uses its own UI + shared lightweight model files.
+    # No GatewayClient, Citadel, or main-app stores are included.
+    sources:
+      - path: ClawShareExtension
+      # Shared model/service files — safe to compile in the extension
+      - path: Claw/Models/ShareIntakeItem.swift
+      - path: Claw/Models/VoiceCommandIntent.swift   # for VoiceCommandRisk
+      - path: Claw/Services/Share/ShareIntakeQueue.swift
+      - path: Claw/Services/Share/ShareMetadataExtractor.swift
+      - path: Claw/Theme/ClawTheme.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.clawos.app.share
+        SWIFT_VERSION: 5.9
+        DEVELOPMENT_TEAM: UD4F4U8M59
+    entitlements:
+      path: ClawShareExtension/ClawShareExtension.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.ai.clawos.shared
+    info:
+      path: ClawShareExtension/Info.plist
 
   ClawWidgets:
     type: app-extension

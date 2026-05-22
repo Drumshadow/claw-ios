@@ -8,14 +8,12 @@ enum GatewayMethod {
     static let pong = "pong"
     static let disconnect = "disconnect"
 
-    // Operator methods
     static let operatorSendMessage = "operator.message.send"
     static let operatorListSessions = "operator.sessions.list"
     static let operatorGetSession = "operator.session.get"
     static let operatorApproveDevice = "operator.device.approve"
     static let operatorListDevices = "operator.devices.list"
 
-    // Session lifecycle methods
     static let sessionsList = "sessions.list"
     static let sessionsCreate = "sessions.create"
     static let sessionsDelete = "sessions.delete"
@@ -25,24 +23,20 @@ enum GatewayMethod {
     static let sessionsMessagesSubscribe = "sessions.messages.subscribe"
     static let sessionsMessagesUnsubscribe = "sessions.messages.unsubscribe"
 
-    // Chat methods
     static let chatHistory = "chat.history"
     static let chatSend = "chat.send"
 
-    // Node management methods
     static let nodesList = "nodes.list"
     static let nodesPending = "nodes.pending"
     static let nodesApprove = "nodes.approve"
     static let nodesReject = "nodes.reject"
     static let nodesNotify = "nodes.notify"
 
-    // Platform administration methods
     static let skillsStatus = "skills.status"
     static let agentsList = "agents.list"
     static let configGet = "config.get"
     static let configPatch = "config.patch"
 
-    // Cron job methods
     static let cronList = "cron.list"
     static let cronEnable = "cron.enable"
     static let cronDisable = "cron.disable"
@@ -50,24 +44,19 @@ enum GatewayMethod {
     static let cronCreate = "cron.create"
     static let cronUpdate = "cron.update"
 
-    // Memory methods
     static let memorySearch = "memory.search"
     static let memoryList = "memory.list"
     static let memoryDelete = "memory.delete"
 
-    // Usage methods
     static let usageCost = "usage.cost"
 
-    // Tool approval / safe-ops methods
     static let toolsApprove = "tools.approve"
     static let toolsDeny = "tools.deny"
     static let toolsSimulate = "tools.simulate"
     static let toolsRollback = "tools.rollback"
 
-    // Phone context bridge methods
     static let phoneResponse = "phone.response"
 
-    // Terminal stream methods
     static let terminalSessionsList = "terminal.sessions.list"
     static let terminalSessionSubscribe = "terminal.session.subscribe"
     static let terminalSessionUnsubscribe = "terminal.session.unsubscribe"
@@ -76,7 +65,6 @@ enum GatewayMethod {
     static let terminalSessionResize = "terminal.session.resize"
     static let terminalSessionKill = "terminal.session.kill"
 
-    // Runbook methods
     static let runbooksList = "runbooks.list"
     static let runbooksExecute = "runbooks.execute"
     static let runbooksExecutionStatus = "runbooks.execution.status"
@@ -85,16 +73,20 @@ enum GatewayMethod {
     static let runbooksExecutionAbort = "runbooks.execution.abort"
     static let runbooksExecutionRollback = "runbooks.execution.rollback"
 
-    // Topology / Infrastructure graph methods
     static let topologySnapshot = "topology.snapshot"
     static let topologySubscribe = "topology.subscribe"
 
-    // Model routing methods
     static let modelsList = "models.list"
     static let modelsCapabilities = "models.capabilities"
     static let routingGet = "routing.get"
     static let routingSet = "routing.set"
     static let routingProfiles = "routing.profiles"
+
+    static let voiceSessionStart = "voice.session.start"
+    static let voiceSessionStop = "voice.session.stop"
+    static let voiceCommandExecute = "voice.command.execute"
+    static let shareIntakeCreate = "share.intake.create"
+    static let shareIntakeStatus = "share.intake.status"
 }
 
 // MARK: - Agent IDs offered when creating sessions
@@ -108,7 +100,6 @@ enum GatewayAgentId {
         let label: String
     }
 
-    /// Fallback display options for the agent picker when gateway capabilities are unavailable.
     static let options: [Option] = [
         Option(id: main, label: "Main"),
         Option(id: claude, label: "Claude Code")
@@ -130,16 +121,13 @@ enum GatewayEventName {
     static let nodeDisconnected = "node.disconnected"
     static let nodePending = "node.pending"
 
-    // Phone context bridge events
     static let phoneRequest = "phone.request"
 
-    // Terminal stream events
     static let terminalOutput = "terminal.output"
     static let terminalSessionStarted = "terminal.session.started"
     static let terminalSessionEnded = "terminal.session.ended"
     static let terminalSessionError = "terminal.session.error"
 
-    // Runbook events
     static let runbookStepStarted = "runbook.step.started"
     static let runbookStepOutput = "runbook.step.output"
     static let runbookStepCompleted = "runbook.step.completed"
@@ -148,21 +136,24 @@ enum GatewayEventName {
     static let runbookExecutionCompleted = "runbook.execution.completed"
     static let runbookExecutionFailed = "runbook.execution.failed"
 
-    // Topology / Infrastructure graph events
     static let topologySnapshot = "topology.snapshot"
     static let topologyNodeUpdated = "topology.node.updated"
     static let topologyIncidentOpened = "topology.incident.opened"
     static let topologyIncidentClosed = "topology.incident.closed"
     static let topologyDeploymentUpdated = "topology.deployment.updated"
 
-    // Model routing events
     static let modelRoutingChanged = "model.routing.changed"
     static let modelHealthUpdate = "model.health.update"
 
-    // Safe-ops events
     static let snapshotCaptured = "snapshot.captured"
     static let snapshotExpired = "snapshot.expired"
     static let rollbackCompleted = "rollback.completed"
+
+    static let voicePartialTranscript = "voice.partial_transcript"
+    static let voiceFinalTranscript = "voice.final_transcript"
+    static let voiceResponseDelta = "voice.response.delta"
+    static let voiceResponseCompleted = "voice.response.completed"
+    static let shareIntakeCompleted = "share.intake.completed"
 }
 
 // MARK: - Connection state enum (shared between transport + app layer)

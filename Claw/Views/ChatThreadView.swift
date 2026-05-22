@@ -30,6 +30,10 @@ struct ChatThreadView: View {
     @State private var avatarPulse: CGFloat = 1.0
     @State private var voiceManager = VoiceInputManager()
     @State private var slashSuggestions: [ClawSkill] = []
+    // Voice Ops Mode (operational push-to-talk, separate from compose dictation)
+    @State private var voiceOpsManager = VoiceOpsManager()
+    @State private var showVoiceOpsOverlay: Bool = false
+    @State private var showVoiceDrivingMode: Bool = false
     @FocusState private var isComposeFocused: Bool
     @Environment(SessionStore.self) private var sessionStore
     @Environment(SkillsStore.self) private var skillsStore
@@ -236,6 +240,29 @@ struct ChatThreadView: View {
                 .tint(Color.clawAccent)
                 .accessibilityLabel("View timeline")
             }
+            // Voice Ops Mode button
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    Button {
+                        showVoiceOpsOverlay = true
+                    } label: {
+                        Label("Voice Command", systemImage: "mic.badge.plus")
+                    }
+                    Button {
+                        showVoiceDrivingMode = true
+                    } label: {
+                        Label("Driving Mode", systemImage: "car.fill")
+                    }
+                } label: {
+                    Image(systemName: voiceOpsManager.isRecording ? "waveform" : "mic.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(
+                            voiceOpsManager.isRecording ? Color.clawDanger :
+                            (voiceOpsManager.isSpeaking ? Color.clawTeal : Color.clawAccent)
+                        )
+                }
+                .accessibilityLabel("Voice Operations")
+            }
         }
         .task {
             await store.subscribe()
@@ -272,6 +299,27 @@ struct ChatThreadView: View {
         }
         .task {
             await voiceManager.requestPermissions()
+        }
+        // Voice Ops Overlay sheet
+        .sheet(isPresented: $showVoiceOpsOverlay) {
+            VoiceOpsOverlay(
+                manager: voiceOpsManager,
+                client: client,
+                sessionKey: session.id,
+                onDismiss: { showVoiceOpsOverlay = false }
+            )
+            .presentationDetents([.large])
+            .presentationBackground(Color.clawBg)
+            .presentationDragIndicator(.visible)
+        }
+        // Voice Driving Mode full screen
+        .fullScreenCover(isPresented: $showVoiceDrivingMode) {
+            VoiceDrivingModeView(
+                manager: voiceOpsManager,
+                client: client,
+                sessionKey: session.id,
+                onDismiss: { showVoiceDrivingMode = false }
+            )
         }
         .sheet(isPresented: $showTimeline) {
             NavigationStack {

@@ -10,6 +10,7 @@ struct ClawApp: App {
     @State private var discovery = GatewayDiscovery()
     @State private var gatewayStore = GatewayStore()
     @State private var pushManager = PushManager()
+    @State private var router = NavigationRouter()
     @State private var showSplash: Bool = true
 
     var body: some Scene {
@@ -20,7 +21,11 @@ struct ClawApp: App {
                     .environment(discovery)
                     .environment(gatewayStore)
                     .environment(pushManager)
+                    .environment(router)
                     .preferredColorScheme(.dark)
+                    .onOpenURL { url in
+                        handleDeepLink(url: url)
+                    }
                     .onAppear {
                         appDelegate.pushManager = pushManager
                         discovery.startDiscovery()
@@ -68,6 +73,31 @@ struct ClawApp: App {
                 }
             }
             .preferredColorScheme(.dark)
+            // Share intake sheet — presented when the app opens via claw://share
+            .sheet(isPresented: Binding(
+                get: { router.showShareIntake && !router.pendingShareItems.isEmpty },
+                set: { if !$0 { router.showShareIntake = false } }
+            )) {
+                if let firstItem = router.pendingShareItems.first {
+                    ShareIntakeView(
+                        item: firstItem,
+                        onDelivered: { _ in
+                            // If there are more items, pop and show the next one
+                            if !router.pendingShareItems.isEmpty {
+                                router.pendingShareItems.removeFirst()
+                            }
+                            if router.pendingShareItems.isEmpty {
+                                router.showShareIntake = false
+                            }
+                        },
+                        onDismiss: {
+                            router.showShareIntake = false
+                            router.pendingShareItems.removeAll()
+                        }
+                    )
+                    .presentationBackground(Color.clawBg)
+                }
+            }
         }
     }
 }
@@ -134,3 +164,27 @@ struct ConnectingView: View {
 }
 
 // NOTE: ConnectedView is defined in Claw/Views/ConnectedView.swift
+
+// MARK: - DeepLink handling (extension on ClawApp)
+
+extension ClawApp {
+    @MainActor
+    func handleDeepLink(url: URL) {
+        guard url.scheme?.lowercased() == "claw" else { return }
+
+        switch url.host?.lowercased() {
+        case "share":
+            // claw://share?pending=1  ← posted by share extension
+            router.presentPendingShares()
+
+        case "session":
+            // claw://session/<sessionKey>  ← future: deep link to a specific session
+            // NavigationRouter doesn't yet have a direct navigate-to-session API;
+            // this is a placeholder for when AdaptiveSessionsLayout supports it.
+            break
+
+        default:
+            break
+        }
+    }
+}
