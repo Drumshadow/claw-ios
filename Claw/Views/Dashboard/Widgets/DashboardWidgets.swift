@@ -61,10 +61,17 @@ struct SystemHealthWidget: View {
     let graph: InfraGraph
 
     private var healthCounts: (ok: Int, degraded: Int, down: Int, unknown: Int) {
-        let ok       = graph.nodes.filter { $0.health == .ok }.count
-        let degraded = graph.nodes.filter { $0.health == .degraded }.count
-        let down     = graph.nodes.filter { $0.health == .down }.count
-        let unknown  = graph.nodes.filter { $0.health == .unknown }.count
+        // Single pass instead of four separate filter+count sweeps over the
+        // same node array, which matters when topology events arrive frequently.
+        var ok = 0, degraded = 0, down = 0, unknown = 0
+        for node in graph.nodes {
+            switch node.health {
+            case .ok:       ok       += 1
+            case .degraded: degraded += 1
+            case .down:     down     += 1
+            case .unknown:  unknown  += 1
+            }
+        }
         return (ok, degraded, down, unknown)
     }
 
@@ -151,13 +158,16 @@ struct IncidentListWidget: View {
     }
 
     var body: some View {
+        // Snapshot once: `sorted` re-filters+sorts on every access, so capturing
+        // it in a local avoids three separate sort calls within one body evaluation.
+        let incidents = sorted
         WidgetCard(
             title: "Active Incidents",
             icon: "exclamationmark.triangle.fill",
             accentColor: .clawDanger,
             alertCount: graph.activeIncidents.count
         ) {
-            if sorted.isEmpty {
+            if incidents.isEmpty {
                 HStack {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(Color.clawOk)
@@ -168,14 +178,14 @@ struct IncidentListWidget: View {
                 .padding(14)
             } else {
                 VStack(spacing: 0) {
-                    ForEach(Array(sorted.prefix(5).enumerated()), id: \.element.id) { idx, inc in
+                    ForEach(Array(incidents.prefix(5).enumerated()), id: \.element.id) { idx, inc in
                         incidentRow(inc)
-                        if idx < min(sorted.count, 5) - 1 {
+                        if idx < min(incidents.count, 5) - 1 {
                             Divider().background(Color.clawBorder).padding(.horizontal, 14)
                         }
                     }
-                    if sorted.count > 5 {
-                        Text("+\(sorted.count - 5) more")
+                    if incidents.count > 5 {
+                        Text("+\(incidents.count - 5) more")
                             .font(.system(size: 11))
                             .foregroundStyle(Color.clawMuted)
                             .frame(maxWidth: .infinity, alignment: .center)
@@ -233,23 +243,26 @@ struct DeploymentFeedWidget: View {
     }
 
     var body: some View {
-        let running = graph.deployments.filter { $0.status == .running }.count
+        // Snapshot once: `sorted` re-filters+sorts on every access, so capturing
+        // it in a local avoids two separate sort calls within one body evaluation.
+        let deployments = sorted
+        let running = deployments.filter { $0.status == .running }.count
         WidgetCard(
             title: "Deployments",
             icon: "arrow.triangle.2.circlepath",
             accentColor: .clawTeal,
             alertCount: running
         ) {
-            if sorted.isEmpty {
+            if deployments.isEmpty {
                 Text("No recent deployments")
                     .font(.system(size: 13))
                     .foregroundStyle(Color.clawMuted)
                     .padding(14)
             } else {
                 VStack(spacing: 0) {
-                    ForEach(Array(sorted.prefix(6).enumerated()), id: \.element.id) { idx, dep in
+                    ForEach(Array(deployments.prefix(6).enumerated()), id: \.element.id) { idx, dep in
                         deployRow(dep)
-                        if idx < min(sorted.count, 6) - 1 {
+                        if idx < min(deployments.count, 6) - 1 {
                             Divider().background(Color.clawBorder).padding(.horizontal, 14)
                         }
                     }
@@ -592,12 +605,18 @@ struct TokenCostWidget: View {
         .frame(maxWidth: .infinity)
     }
 
-    private func formatCost(_ v: Double) -> String {
+    // NumberFormatter allocation is expensive; share one instance across all
+    // renders instead of allocating a new one every time body is evaluated.
+    private static let costFormatter: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .currency
         f.currencyCode = "USD"
         f.maximumFractionDigits = 2
-        return f.string(from: NSNumber(value: v)) ?? "$0.00"
+        return f
+    }()
+
+    private func formatCost(_ v: Double) -> String {
+        Self.costFormatter.string(from: NSNumber(value: v)) ?? "$0.00"
     }
 
     private func formatTokens(_ v: Int) -> String {

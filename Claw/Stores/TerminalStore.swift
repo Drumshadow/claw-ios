@@ -237,10 +237,14 @@ final class TerminalStore {
 
     // MARK: - Export
 
+    // ISO8601DateFormatter is expensive to allocate; share one instance across all
+    // export calls rather than creating a fresh one for every log line.
+    private static let exportDateFormatter: ISO8601DateFormatter = ISO8601DateFormatter()
+
     /// Returns plain-text (ANSI stripped) log suitable for sharing.
     func exportLog() -> String {
         buffer.lines.map { line in
-            let ts = ISO8601DateFormatter().string(from: line.timestamp)
+            let ts = Self.exportDateFormatter.string(from: line.timestamp)
             return "[\(ts)] \(line.plainText)"
         }.joined(separator: "\n")
     }

@@ -36,6 +36,10 @@ final class TopologyStore {
     private static let refreshInterval: TimeInterval = 30
 
     private let decoder = JSONDecoder()
+    // Reuse one encoder across all parse calls — JSONEncoder allocation is not
+    // free and parseGraph/parseIncident/parseDeployment are called on every
+    // topology event, which can be frequent during live deployments.
+    private let encoder = JSONEncoder()
 
     init(client: GatewayClient) {
         self.client = client
@@ -189,7 +193,6 @@ final class TopologyStore {
     private func parseGraph(from payload: [String: JSONValue]) -> InfraGraph? {
         guard !payload.isEmpty else { return nil }
         // Re-encode the payload dict back to Data, then decode InfraGraph
-        let encoder = JSONEncoder()
         guard let data = try? encoder.encode(payload),
               let g = try? decoder.decode(InfraGraph.self, from: data) else {
             return nil
@@ -198,7 +201,6 @@ final class TopologyStore {
     }
 
     private func parseIncident(from payload: [String: JSONValue]) -> InfraIncident? {
-        let encoder = JSONEncoder()
         guard let data = try? encoder.encode(payload),
               let inc = try? decoder.decode(InfraIncident.self, from: data) else {
             return nil
@@ -207,7 +209,6 @@ final class TopologyStore {
     }
 
     private func parseDeployment(from payload: [String: JSONValue]) -> DeploymentEvent? {
-        let encoder = JSONEncoder()
         guard let data = try? encoder.encode(payload),
               let dep = try? decoder.decode(DeploymentEvent.self, from: data) else {
             return nil

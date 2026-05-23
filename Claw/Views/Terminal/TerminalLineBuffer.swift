@@ -4,31 +4,28 @@ struct TerminalLine: Identifiable, Equatable {
     let id: UUID
     let raw: String          // original with ANSI codes
     let timestamp: Date
+    // Pre-computed at init so repeated accesses (search, timestamps display,
+    // export) pay the ANSI-strip cost only once per line.
+    let plainText: String
 
     init(raw: String, timestamp: Date = Date()) {
         self.id = UUID()
         self.raw = raw
         self.timestamp = timestamp
-    }
 
-    // Strip ANSI codes for search and display purposes
-    var plainText: String {
+        // Strip ANSI escape sequences for search and display purposes.
         var result = ""
         var inEscape = false
-
         for char in raw {
             if char == "\u{1B}" {
                 inEscape = true
             } else if inEscape {
-                if char.isLetter {
-                    inEscape = false
-                }
+                if char.isLetter { inEscape = false }
             } else {
                 result.append(char)
             }
         }
-
-        return result
+        self.plainText = result
     }
 }
 
