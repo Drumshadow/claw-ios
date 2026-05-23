@@ -167,7 +167,9 @@ final class TerminalStore {
             }
         } catch {
             // Non-fatal — history is best-effort
+            #if DEBUG
             print("TerminalStore: history load failed: \(error)")
+            #endif
         }
         isLoadingHistory = false
     }

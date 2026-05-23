@@ -44,7 +44,9 @@ final class BiometricGuard {
 
         // Check if biometric authentication is available
         guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
+            #if DEBUG
             print("BiometricGuard: Biometric authentication not available: \(error?.localizedDescription ?? "unknown")")
+            #endif
             // Fall back to device passcode if biometrics unavailable
             return await authenticateWithPasscode(reason: reason)
         }
@@ -56,7 +58,9 @@ final class BiometricGuard {
             )
             return success
         } catch let error as LAError {
+            #if DEBUG
             print("BiometricGuard: Authentication failed: \(error.localizedDescription)")
+            #endif
 
             // If biometric fails, offer passcode as fallback for critical operations
             switch error.code {
@@ -66,7 +70,9 @@ final class BiometricGuard {
                 return false
             }
         } catch {
+            #if DEBUG
             print("BiometricGuard: Unexpected error: \(error)")
+            #endif
             return false
         }
     }
@@ -82,7 +88,9 @@ final class BiometricGuard {
             )
             return success
         } catch {
+            #if DEBUG
             print("BiometricGuard: Passcode authentication failed: \(error.localizedDescription)")
+            #endif
             return false
         }
     }

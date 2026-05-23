@@ -127,7 +127,9 @@ final class ShareIntakeQueue {
             try data.write(to: queueFileURL, options: [.atomic])
         } catch {
             // Non-fatal — queue still works in-memory
+            #if DEBUG
             print("[ShareIntakeQueue] Save failed: \(error)")
+            #endif
         }
     }
 

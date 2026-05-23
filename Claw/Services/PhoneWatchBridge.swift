@@ -141,7 +141,9 @@ final class PhoneWatchBridge: NSObject {
             session.sendMessage(payload, replyHandler: { [weak self] _ in
                 Task { @MainActor in self?.lastSyncDate = Date() }
             }, errorHandler: { [weak self] error in
+                #if DEBUG
                 print("PhoneWatchBridge: sendMessage error: \(error)")
+                #endif
                 onFail?()
                 _ = self
             })

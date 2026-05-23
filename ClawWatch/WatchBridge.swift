@@ -137,7 +137,9 @@ final class WatchBridge: NSObject, WCSessionDelegate {
             ["type": "approval_response", "id": id, "approved": approved],
             replyHandler: nil,
             errorHandler: { error in
+                #if DEBUG
                 print("WatchBridge: sendApproval error: \(error)")
+                #endif
             }
         )
         pendingApprovals.removeAll { $0.id == id }

@@ -1,11 +1,22 @@
 import SwiftUI
-import LocalAuthentication
 
 // MARK: - ToolApprovalSheet
 
 struct ToolApprovalSheet: View {
     let request: ToolApprovalRequest
     let store: ToolApprovalStore
+
+    /// True while a biometric / passcode prompt is in flight — prevents double-tap.
+    @State private var isAuthenticating = false
+
+    /// Whether this request requires user authentication before proceeding.
+    /// Triggers on gateway-supplied `isDestructive`, policy-level `requireBiometric`,
+    /// or a `RiskLevel.critical` evaluation (which always requires biometric).
+    private var needsAuth: Bool {
+        request.isDestructive
+            || request.riskLevel.requiresBiometric
+            || (request.matchedPolicy?.requireBiometric == true)
+    }
 
     var body: some View {
         ZStack {
@@ -111,7 +122,7 @@ struct ToolApprovalSheet: View {
 
     private var approveButton: some View {
         Button {
-            handleApprove()
+            Task { await handleApprove() }
         } label: {
             Text("Approve")
                 .font(.headline)
@@ -120,12 +131,12 @@ struct ToolApprovalSheet: View {
                 .padding(.vertical, 14)
                 .background(Color.clawOk, in: RoundedRectangle(cornerRadius: 12))
         }
+        .disabled(isAuthenticating)
     }
 
     private var alwaysAllowButton: some View {
         Button {
-            store.alwaysAllow(toolName: request.toolName)
-            store.approve(id: request.id)
+            Task { await handleAlwaysAllow() }
         } label: {
             Text("Always Allow \"\(request.toolName)\"")
                 .font(.subheadline)
@@ -138,6 +149,7 @@ struct ToolApprovalSheet: View {
                         .stroke(Color.clawBorder, lineWidth: 1)
                 )
         }
+        .disabled(isAuthenticating)
     }
 
     private var denyButton: some View {
@@ -166,28 +178,41 @@ struct ToolApprovalSheet: View {
         }
     }
 
-    // MARK: - Face ID for destructive approve
+    // MARK: - Approve with optional biometric / passcode gate
 
-    private func handleApprove() {
-        guard request.isDestructive else {
+    /// Approves the request, requiring device authentication when `needsAuth` is true.
+    /// Uses `BiometricGuard` so Face ID / Touch ID failures fall back to the device
+    /// passcode rather than silently approving.
+    @MainActor
+    private func handleApprove() async {
+        guard needsAuth else {
             store.approve(id: request.id)
             return
         }
+        isAuthenticating = true
+        defer { isAuthenticating = false }
+        let ok = await BiometricGuard.shared.authenticate(
+            reason: "Confirm tool execution: \(request.toolName)"
+        )
+        guard ok else { return }
+        store.approve(id: request.id)
+    }
 
-        let context = LAContext()
-        var error: NSError?
-        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
-            // No biometrics available — allow anyway
-            store.approve(id: request.id)
-            return
+    /// Adds the tool to the always-allow list and approves the current request.
+    /// When the request requires authentication (destructive / critical / policy-gated),
+    /// the same biometric / passcode check is required before the permanent bypass
+    /// is recorded — preventing a UI shortcut that skips the auth gate.
+    @MainActor
+    private func handleAlwaysAllow() async {
+        if needsAuth {
+            isAuthenticating = true
+            defer { isAuthenticating = false }
+            let ok = await BiometricGuard.shared.authenticate(
+                reason: "Allow \"\(request.toolName)\" to always run without approval"
+            )
+            guard ok else { return }
         }
-        context.evaluatePolicy(
-            .deviceOwnerAuthenticationWithBiometrics,
-            localizedReason: "Confirm destructive tool execution"
-        ) { success, _ in
-            if success {
-                Task { @MainActor in store.approve(id: request.id) }
-            }
-        }
+        store.alwaysAllow(toolName: request.toolName)
+        store.approve(id: request.id)
     }
 }
