@@ -164,8 +164,33 @@ final class PhoneWatchBridge: NSObject {
 
     private func formatInputSummary(_ input: [String: JSONValue]) -> String {
         input.prefix(3)
-            .map { "\($0.key): \($0.value)" }
+            .map { key, value in "\(key): \(redactedValue(for: key, value: value))" }
             .joined(separator: ", ")
+    }
+
+    private func redactedValue(for key: String, value: JSONValue) -> String {
+        let sensitiveTerms = ["token", "secret", "password", "passwd", "authorization", "credential", "privatekey", "apikey"]
+        let normalizedKey = key.replacingOccurrences(of: "_", with: "").lowercased()
+        if sensitiveTerms.contains(where: { normalizedKey.contains($0) }) {
+            return "<redacted>"
+        }
+
+        switch value {
+        case .null:
+            return "null"
+        case .bool(let bool):
+            return String(bool)
+        case .int(let int):
+            return String(int)
+        case .double(let double):
+            return String(double)
+        case .string(let string):
+            return String(string.prefix(160))
+        case .array(let array):
+            return "[\(array.count) items]"
+        case .object(let object):
+            return "{\(object.count) fields}"
+        }
     }
 }
 

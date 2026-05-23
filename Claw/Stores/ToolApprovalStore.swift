@@ -200,8 +200,17 @@ final class ToolApprovalStore {
             environment = "unknown"
         }
 
-        // Auto-approve if tool is in always-allow list
-        if isAlwaysAllowed(toolName) {
+        // Evaluate via PolicyEngine before any bypass decisions so stored
+        // allowlists cannot silently skip destructive or biometric-gated flows.
+        let engine = PolicyStore.shared.engine
+        let (matchedPolicy, riskLevel) = engine.evaluate(tool: toolName, environment: environment)
+        let requiresUserAuth = isDestructive
+            || riskLevel.requiresBiometric
+            || (matchedPolicy?.requireBiometric == true)
+
+        // Auto-approve if tool is in always-allow list, but never bypass a
+        // destructive request or a policy/risk level that requires device auth.
+        if isAlwaysAllowed(toolName), !requiresUserAuth {
             Task {
                 struct ApproveParams: Encodable { let approvalId: String }
                 _ = try? await client.send(method: GatewayMethod.toolsApprove, params: ApproveParams(approvalId: approvalId))
@@ -209,12 +218,9 @@ final class ToolApprovalStore {
             return
         }
 
-        // Evaluate via PolicyEngine
-        let engine = PolicyStore.shared.engine
-        let (matchedPolicy, riskLevel) = engine.evaluate(tool: toolName, environment: environment)
-
-        // Auto-approve if policy says so (and not destructive override)
-        if let policy = matchedPolicy, policy.autoApprove, !isDestructive {
+        // Auto-approve if policy says so, unless the request still needs an
+        // explicit destructive/biometric confirmation.
+        if let policy = matchedPolicy, policy.autoApprove, !requiresUserAuth {
             Task {
                 struct ApproveParams: Encodable { let approvalId: String }
                 _ = try? await client.send(method: GatewayMethod.toolsApprove, params: ApproveParams(approvalId: approvalId))
@@ -225,7 +231,7 @@ final class ToolApprovalStore {
         // Register rollback snapshot for danger/critical operations
         var snapshotId: UUID? = nil
         if riskLevel >= .danger {
-            let inputSummary = toolInput.prefix(3).map { "\($0.key)=\($0.value)" }.joined(separator: ", ")
+            let inputSummary = redactedInputSummary(toolInput)
             let snapshot = RollbackSnapshotStore.shared.register(
                 approvalId: approvalId,
                 sessionKey: sessionKey,
@@ -274,6 +280,37 @@ final class ToolApprovalStore {
         let notes = payload["notes"]?.stringValue
         if let snapshot = RollbackSnapshotStore.shared.snapshots.first(where: { $0.approvalId == approvalId }) {
             RollbackSnapshotStore.shared.markRolledBack(snapshot.id, notes: notes)
+        }
+    }
+
+    private func redactedInputSummary(_ input: [String: JSONValue]) -> String {
+        input.prefix(3)
+            .map { key, value in "\(key)=\(redactedValue(for: key, value: value))" }
+            .joined(separator: ", ")
+    }
+
+    private func redactedValue(for key: String, value: JSONValue) -> String {
+        let sensitiveTerms = ["token", "secret", "password", "passwd", "authorization", "credential", "privatekey", "api_key", "apikey"]
+        let normalizedKey = key.replacingOccurrences(of: "_", with: "").lowercased()
+        if sensitiveTerms.contains(where: { normalizedKey.contains($0) }) {
+            return "<redacted>"
+        }
+
+        switch value {
+        case .null:
+            return "null"
+        case .bool(let bool):
+            return String(bool)
+        case .int(let int):
+            return String(int)
+        case .double(let double):
+            return String(double)
+        case .string(let string):
+            return String(string.prefix(160))
+        case .array(let array):
+            return "[\(array.count) items]"
+        case .object(let object):
+            return "{\(object.count) fields}"
         }
     }
 }
