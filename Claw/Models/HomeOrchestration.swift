@@ -215,6 +215,7 @@ enum HomeTaskPriority: String, CaseIterable, Hashable {
 //
 // Gateway contract:
 //   - List:   GatewayMethod.homeGroceriesList   → { items: [GroceryItem], lists: [GroceryList] }
+//   - Create: GatewayMethod.homeGroceriesCreate → GroceryItem
 //   - Update: GatewayMethod.homeGroceriesUpdate → { id, isBought }
 
 struct GroceryItem: Identifiable, Hashable {

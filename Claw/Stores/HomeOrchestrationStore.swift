@@ -6,9 +6,9 @@ import Foundation
 // household tasks, and grocery lists.
 //
 // Backend expectations:
-//   methods: home.integrations.list, home.integration.toggle, home.integration.sync,
+//   methods: home.integrations.list, home.integration.create, home.integration.toggle, home.integration.sync,
 //            home.tasks.list, home.tasks.create, home.tasks.update,
-//            home.groceries.list, home.groceries.update
+//            home.groceries.list, home.groceries.create, home.groceries.update
 //   events:  home.integration.status, home.task.created, home.task.updated
 
 @Observable
@@ -177,6 +177,51 @@ final class HomeOrchestrationStore {
         }
     }
 
+    func createCustomIntegration(name: String, endpoint: String?, description: String, capabilities: Set<IntegrationCapability>) async {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { return }
+
+        let integration = HomeIntegration(
+            id: "custom-\(UUID().uuidString)",
+            name: trimmedName,
+            kind: .custom,
+            isEnabled: true,
+            connectionStatus: .unconfigured,
+            lastSyncAt: nil,
+            capabilities: Array(capabilities).sorted { $0.rawValue < $1.rawValue },
+            endpoint: endpoint?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+            description: description.trimmingCharacters(in: .whitespacesAndNewlines),
+            authMethod: nil,
+            metadata: [:]
+        )
+        integrations.insert(integration, at: 0)
+
+        struct CreateParams: Encodable {
+            let name: String
+            let kind: String
+            let endpoint: String?
+            let description: String
+            let capabilities: [String]
+            let enabled: Bool
+        }
+
+        if let payload = try? await client.send(
+            method: GatewayMethod.homeIntegrationCreate,
+            params: CreateParams(
+                name: integration.name,
+                kind: integration.kind.rawValue,
+                endpoint: integration.endpoint,
+                description: integration.description,
+                capabilities: integration.capabilities.map(\.rawValue),
+                enabled: integration.isEnabled
+            )
+        ),
+           let created = parseCreatedIntegration(payload),
+           let idx = integrations.firstIndex(where: { $0.id == integration.id }) {
+            integrations[idx] = created
+        }
+    }
+
     // MARK: - Task Actions
 
     func createTask(title: String, description: String?, priority: HomeTaskPriority, dueDate: Date?, assignToAgent: Bool) async {
@@ -254,7 +299,22 @@ final class HomeOrchestrationStore {
         )
         groceryLists[listIdx].items.insert(item, at: 0)
 
-        // TODO: gateway.send(method: homeGroceriesCreate, params: ...)
+        struct CreateParams: Encodable {
+            let listId: String
+            let name: String
+            let quantity: String?
+            let category: String
+        }
+
+        if let payload = try? await client.send(
+            method: GatewayMethod.homeGroceriesCreate,
+            params: CreateParams(listId: listId, name: name, quantity: quantity, category: category.rawValue)
+        ),
+           let created = parseCreatedGroceryItem(payload, listId: listId),
+           let currentListIdx = groceryLists.firstIndex(where: { $0.id == listId }),
+           let tempIdx = groceryLists[currentListIdx].items.firstIndex(where: { $0.id == item.id }) {
+            groceryLists[currentListIdx].items[tempIdx] = created
+        }
     }
 
     // MARK: - Event Subscription
@@ -331,6 +391,12 @@ final class HomeOrchestrationStore {
             authMethod: nil,
             metadata: [:]
         )
+    }
+
+    private func parseCreatedIntegration(_ payload: [String: JSONValue]) -> HomeIntegration? {
+        if let integration = parseIntegration(.object(payload)) { return integration }
+        if let value = payload["integration"] { return parseIntegration(value) }
+        return nil
     }
 
     private func parseTask(_ value: JSONValue) -> HomeTask? {
@@ -410,6 +476,12 @@ final class HomeOrchestrationStore {
         )
     }
 
+    private func parseCreatedGroceryItem(_ payload: [String: JSONValue], listId: String) -> GroceryItem? {
+        if let item = parseGroceryItem(.object(payload), listId: listId) { return item }
+        if let value = payload["item"] { return parseGroceryItem(value, listId: listId) }
+        return nil
+    }
+
     private func dateFromValue(_ value: JSONValue?) -> Date? {
         guard let value else { return nil }
         switch value {
@@ -429,3 +501,7 @@ final class HomeOrchestrationStore {
 // MARK: - Helpers
 
 private struct EmptyParams: Encodable {}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
+}

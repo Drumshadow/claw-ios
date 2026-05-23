@@ -114,10 +114,12 @@ enum GatewayMethod {
     static let agentNetworkSubscribe = "agents.network.subscribe"
 
     static let homeIntegrationsList = "home.integrations.list"
+    static let homeIntegrationCreate = "home.integration.create"
     static let homeIntegrationToggle = "home.integration.toggle"
     static let homeIntegrationSync = "home.integration.sync"
     static let homeReminders = "home.reminders"
     static let homeGroceriesList = "home.groceries.list"
+    static let homeGroceriesCreate = "home.groceries.create"
     static let homeGroceriesUpdate = "home.groceries.update"
     static let homeTasksList = "home.tasks.list"
     static let homeTasksCreate = "home.tasks.create"

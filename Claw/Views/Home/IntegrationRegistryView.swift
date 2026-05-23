@@ -8,6 +8,7 @@ import SwiftUI
 struct IntegrationRegistryView: View {
     @Environment(HomeOrchestrationStore.self) private var store
     @State private var selectedIntegration: HomeIntegration? = nil
+    @State private var showCustomIntegrationForm = false
 
     var body: some View {
         List {
@@ -40,10 +41,9 @@ struct IntegrationRegistryView: View {
                 }
             }
 
-            // Add custom integration placeholder
             Section {
                 Button {
-                    // TODO: custom integration creation flow
+                    showCustomIntegrationForm = true
                 } label: {
                     Label("Add custom integration…", systemImage: "plus.circle.dashed")
                         .foregroundStyle(Color.clawAccent)
@@ -61,6 +61,103 @@ struct IntegrationRegistryView: View {
         .toolbarColorScheme(.dark, for: .navigationBar)
         .task { await store.loadAll() }
         .refreshable { await store.loadAll() }
+        .sheet(isPresented: $showCustomIntegrationForm) {
+            CustomIntegrationForm { name, endpoint, description, capabilities in
+                Task {
+                    await store.createCustomIntegration(
+                        name: name,
+                        endpoint: endpoint,
+                        description: description,
+                        capabilities: capabilities
+                    )
+                }
+            }
+        }
+    }
+}
+
+// MARK: - CustomIntegrationForm
+
+private struct CustomIntegrationForm: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let onSave: (String, String?, String, Set<IntegrationCapability>) -> Void
+
+    @State private var name = ""
+    @State private var endpoint = ""
+    @State private var description = ""
+    @State private var capabilities: Set<IntegrationCapability> = [.read]
+
+    private var canSave: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !capabilities.isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Details") {
+                    TextField("Name", text: $name)
+                    TextField("Endpoint or local path", text: $endpoint)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+                    TextField("Description", text: $description, axis: .vertical)
+                        .lineLimit(3, reservesSpace: true)
+                }
+
+                Section("Capabilities") {
+                    ForEach(IntegrationCapability.allCases, id: \.self) { capability in
+                        Button {
+                            toggle(capability)
+                        } label: {
+                            HStack {
+                                Label(capability.displayName, systemImage: capability.systemImage)
+                                Spacer()
+                                if capabilities.contains(capability) {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(Color.clawAccent)
+                                }
+                            }
+                        }
+                        .foregroundStyle(Color.clawText)
+                    }
+                }
+
+                Section {
+                    Text("Custom integrations are registered with the gateway when supported. Until a backend connector is configured, they appear as unconfigured so you can keep the registry accurate without pretending a connection exists.")
+                        .font(.footnote)
+                        .foregroundStyle(Color.clawMuted)
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color.clawBg)
+            .navigationTitle("Custom Integration")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        onSave(
+                            name,
+                            endpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : endpoint,
+                            description,
+                            capabilities
+                        )
+                        dismiss()
+                    }
+                    .disabled(!canSave)
+                }
+            }
+        }
+    }
+
+    private func toggle(_ capability: IntegrationCapability) {
+        if capabilities.contains(capability) {
+            if capabilities.count > 1 { capabilities.remove(capability) }
+        } else {
+            capabilities.insert(capability)
+        }
     }
 }
 
