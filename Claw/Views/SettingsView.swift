@@ -6,12 +6,22 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @Environment(GatewayStore.self) private var gatewayStore
+    @Environment(SessionStore.self) private var sessionStore: SessionStore?
+    @Environment(AgentMonitorStore.self) private var agentMonitorStore: AgentMonitorStore?
+    @Environment(BackgroundAgentStore.self) private var bgAgentStore: BackgroundAgentStore?
+    @Environment(MemoryTimelineStore.self) private var timelineStore: MemoryTimelineStore?
+    @Environment(TerminalSessionStore.self) private var terminalSessionStore: TerminalSessionStore?
+    @Environment(RunbookStore.self) private var runbookStore: RunbookStore?
+    @Environment(HomeOrchestrationStore.self) private var homeStore: HomeOrchestrationStore?
+    @Environment(ToolApprovalStore.self) private var approvalStore: ToolApprovalStore?
     @Environment(\.dismiss) private var dismiss
 
     @State private var showAddGateway = false
     @State private var showResetPairingAlert = false
     @State private var deviceID: String = ""
     @State private var copiedDeviceID = false
+    @State private var sampleModeEnabled = AppReviewSampleData.isEnabled
+    @State private var sampleModeLoaded = false
 
     // MARK: - Commandments state
     @State private var commandments: [Commandment] = []
@@ -26,6 +36,7 @@ struct SettingsView: View {
                 gatewaysSection
                 currentConnectionSection
                 platformSection
+                appReviewSection
                 powerSection
                 commandmentsSection
                 deviceSection
@@ -287,6 +298,69 @@ struct SettingsView: View {
                     .foregroundStyle(Color.clawMuted)
             }
         }
+    }
+
+    // MARK: - App Review section
+
+    private var appReviewSection: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { sampleModeEnabled },
+                set: { enabled in
+                    sampleModeEnabled = enabled
+                    AppReviewSampleData.isEnabled = enabled
+                    if enabled { loadAppReviewSamples() }
+                }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("App Review Sample Data")
+                        .foregroundStyle(Color.clawTextStrong)
+                    Text("Screenshot-safe local data for internal Claw features only")
+                        .font(.caption)
+                        .foregroundStyle(Color.clawMuted)
+                }
+            }
+            .tint(Color.clawAccent)
+
+            Button {
+                sampleModeEnabled = true
+                AppReviewSampleData.enable()
+                loadAppReviewSamples()
+            } label: {
+                Label(sampleModeLoaded ? "Sample Data Loaded" : "Load Sample Data Now", systemImage: sampleModeLoaded ? "checkmark.circle.fill" : "photo.on.rectangle.angled")
+                    .foregroundStyle(sampleModeLoaded ? Color.clawOk : Color.clawAccent)
+            }
+
+            if sampleModeEnabled {
+                Button(role: .destructive) {
+                    sampleModeEnabled = false
+                    sampleModeLoaded = false
+                    AppReviewSampleData.disable()
+                } label: {
+                    Label("Turn Off Sample Mode", systemImage: "xmark.circle")
+                        .foregroundStyle(Color.clawDanger)
+                }
+            }
+        } header: {
+            Text("App Review")
+                .foregroundStyle(Color.clawMuted)
+        } footer: {
+            Text("Loads local sample sessions, messages, agents, topology, terminal sessions, runbooks, memory timeline, and dashboards. It intentionally avoids external integrations and third-party app data so screenshots can be captured without live services.")
+                .foregroundStyle(Color.clawMuted.opacity(0.8))
+        }
+        .listRowBackground(Color.clawCard)
+    }
+
+    private func loadAppReviewSamples() {
+        sessionStore?.loadAppReviewSampleData()
+        agentMonitorStore?.loadAppReviewSampleData()
+        bgAgentStore?.loadAppReviewSampleData()
+        timelineStore?.loadAppReviewSampleData()
+        terminalSessionStore?.loadAppReviewSampleData()
+        runbookStore?.loadAppReviewSampleData()
+        homeStore?.loadAppReviewSampleData()
+        approvalStore?.loadAppReviewSampleData()
+        withAnimation { sampleModeLoaded = true }
     }
 
     // MARK: - Power section

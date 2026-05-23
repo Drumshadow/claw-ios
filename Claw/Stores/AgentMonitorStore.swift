@@ -52,7 +52,7 @@ final class AgentMonitorStore {
 
     init(client: GatewayClient) {
         self.client = client
-        startEventSubscription()
+        if !AppReviewSampleData.isEnabled { startEventSubscription() }
     }
 
     deinit {
@@ -64,6 +64,11 @@ final class AgentMonitorStore {
     // MARK: - Load
 
     func load() async {
+        if AppReviewSampleData.isEnabled {
+            loadAppReviewSampleData()
+            return
+        }
+
         struct MonitorListParams: Encodable {
             let activeMinutes: Int = 180
             let includeDerivedTitles: Bool = true
@@ -90,6 +95,19 @@ final class AgentMonitorStore {
             if a.status.isActive != b.status.isActive { return a.status.isActive }
             return (a.updatedAt ?? .distantPast) > (b.updatedAt ?? .distantPast)
         }
+    }
+
+    // MARK: - App Review sample data
+
+    func loadAppReviewSampleData() {
+        pollTask?.cancel()
+        eventTask?.cancel()
+        reloadDebounceTask?.cancel()
+        pollTask = nil
+        eventTask = nil
+        reloadDebounceTask = nil
+        sessions = AppReviewSampleData.agentMonitorSessions
+        isLoading = false
     }
 
     // MARK: - Refresh

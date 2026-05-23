@@ -47,7 +47,7 @@ final class BackgroundAgentStore {
 
     init(client: GatewayClient) {
         self.client = client
-        startEventSubscription()
+        if !AppReviewSampleData.isEnabled { startEventSubscription() }
     }
 
     deinit {
@@ -58,6 +58,10 @@ final class BackgroundAgentStore {
     // MARK: - Load
 
     func loadAll() async {
+        if AppReviewSampleData.isEnabled {
+            loadAppReviewSampleData()
+            return
+        }
         async let watchersResult: Void = loadWatchers()
         async let incidentsResult: Void = loadIncidents()
         async let proposalsResult: Void = loadProposals()
@@ -109,6 +113,34 @@ final class BackgroundAgentStore {
         if let arr = payload["proposals"], case .array(let items) = arr {
             proposals = items.compactMap { parseProposal($0) }
         }
+    }
+
+    // MARK: - App Review sample data
+
+    func loadAppReviewSampleData() {
+        eventTask?.cancel()
+        reloadDebounce?.cancel()
+        eventTask = nil
+        reloadDebounce = nil
+        watchers = BackgroundWatcher.previewWatchers.map { watcher in
+            var copy = watcher
+            copy.eventSourceIds = []
+            switch copy.id {
+            case "w-2":
+                copy.name = "Nightly Code Audit"
+                copy.description = "Summarize local code changes and validation results each night"
+                copy.condition = "Daily at 23:00"
+                copy.lastResult?.summary = "14 changes reviewed, 3 follow-ups, 2 checks need attention"
+            case "w-3":
+                copy.description = "Alert when local service memory exceeds 85%"
+            default:
+                break
+            }
+            return copy
+        }
+        incidents = Incident.previewIncidents
+        proposals = []
+        loadError = nil
     }
 
     // MARK: - Watcher CRUD

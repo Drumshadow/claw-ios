@@ -48,8 +48,10 @@ final class DashboardStore {
     // MARK: - Init
 
     init() {
-        if let data = UserDefaults.standard.data(forKey: Self.persistKey),
-           let saved = try? JSONDecoder().decode(DashboardConfig.self, from: data) {
+        if AppReviewSampleData.isEnabled {
+            self.config = AppReviewSampleData.screenshotDashboardConfig
+        } else if let data = UserDefaults.standard.data(forKey: Self.persistKey),
+                  let saved = try? JSONDecoder().decode(DashboardConfig.self, from: data) {
             self.config = saved
         } else {
             self.config = .default
@@ -135,5 +137,17 @@ final class DashboardStore {
     func resetToDefault() {
         config = .default
         persist()
+    }
+
+    func loadAppReviewSampleData() {
+        config = AppReviewSampleData.screenshotDashboardConfig
+        updateLiveData(
+            activeSessions: AppReviewSampleData.sessions.count,
+            runningAgents: 1,
+            pendingApprovals: 1,
+            cronRecentFailures: 0,
+            totalTokensToday: AppReviewSampleData.sessions.reduce(0) { $0 + ($1.totalTokens ?? 0) },
+            totalCostTodayUsd: AppReviewSampleData.sessions.reduce(0) { $0 + ($1.estimatedCostUsd ?? 0) }
+        )
     }
 }

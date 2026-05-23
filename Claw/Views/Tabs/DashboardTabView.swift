@@ -36,6 +36,12 @@ struct DashboardTabView: View {
                 try? await Task.sleep(nanoseconds: 10_000_000_000)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: AppReviewSampleData.didChangeNotification)) { _ in
+            if AppReviewSampleData.isEnabled {
+                dashboardStore.loadAppReviewSampleData()
+                topologyStore?.loadAppReviewSampleData()
+            }
+        }
     }
 
     private var bootingView: some View {
@@ -66,6 +72,10 @@ struct DashboardTabView: View {
     }
 
     private func syncLiveData() {
+        if AppReviewSampleData.isEnabled {
+            dashboardStore.loadAppReviewSampleData()
+            return
+        }
         let sessions = sessionStore.sessions
         let active = sessions.count
         let running = sessions.filter { $0.agentStatus == .running || $0.agentStatus == .thinking }.count

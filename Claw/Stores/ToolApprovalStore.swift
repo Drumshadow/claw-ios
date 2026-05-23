@@ -51,7 +51,11 @@ final class ToolApprovalStore {
 
     init(client: GatewayClient) {
         self.client = client
-        startEventSubscription()
+        if AppReviewSampleData.isEnabled {
+            loadAppReviewSampleData()
+        } else {
+            startEventSubscription()
+        }
     }
 
     deinit {
@@ -61,6 +65,10 @@ final class ToolApprovalStore {
     // MARK: - Approve / Deny
 
     func approve(id: String) {
+        if AppReviewSampleData.isEnabled {
+            pendingApprovals.removeAll { $0.id == id }
+            return
+        }
         // Mark any associated snapshot as executed
         if let approval = pendingApprovals.first(where: { $0.id == id }),
            let snapshotId = approval.snapshotId {
@@ -76,6 +84,7 @@ final class ToolApprovalStore {
 
     func deny(id: String) {
         pendingApprovals.removeAll { $0.id == id }
+        guard !AppReviewSampleData.isEnabled else { return }
         Task {
             struct DenyParams: Encodable { let approvalId: String }
             _ = try? await client.send(method: GatewayMethod.toolsDeny, params: DenyParams(approvalId: id))
@@ -114,6 +123,14 @@ final class ToolApprovalStore {
 
     var alwaysAllowedTools: [String] {
         Array(ensureAlwaysAllowCache()).sorted()
+    }
+
+    // MARK: - App Review sample data
+
+    func loadAppReviewSampleData() {
+        eventTask?.cancel()
+        eventTask = nil
+        pendingApprovals = AppReviewSampleData.approvals
     }
 
     // MARK: - Private: Keychain-backed always-allow persistence

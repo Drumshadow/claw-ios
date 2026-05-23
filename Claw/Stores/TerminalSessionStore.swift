@@ -35,13 +35,18 @@ final class TerminalSessionStore {
 
     init(client: GatewayClient) {
         self.client = client
-        sessions = loadCache()
-        startEventSubscription()
+        sessions = AppReviewSampleData.isEnabled ? AppReviewSampleData.terminalSessions : loadCache()
+        if !AppReviewSampleData.isEnabled { startEventSubscription() }
     }
 
     // MARK: - Load
 
     func load() async throws {
+        if AppReviewSampleData.isEnabled {
+            loadAppReviewSampleData()
+            return
+        }
+
         isLoading = true
         loadError = nil
         defer { isLoading = false }
@@ -75,6 +80,15 @@ final class TerminalSessionStore {
                 sessions = TerminalSession.sampleSessions
             }
         }
+    }
+
+    // MARK: - App Review sample data
+
+    func loadAppReviewSampleData() {
+        eventTask?.cancel()
+        eventTask = nil
+        sessions = AppReviewSampleData.terminalSessions
+        loadError = nil
     }
 
     // MARK: - TerminalStore lifecycle

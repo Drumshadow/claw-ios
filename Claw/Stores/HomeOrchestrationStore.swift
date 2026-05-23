@@ -45,7 +45,7 @@ final class HomeOrchestrationStore {
 
     init(client: GatewayClient) {
         self.client = client
-        startEventSubscription()
+        if !AppReviewSampleData.isEnabled { startEventSubscription() }
     }
 
     deinit {
@@ -55,6 +55,11 @@ final class HomeOrchestrationStore {
     // MARK: - Load
 
     func loadAll() async {
+        if AppReviewSampleData.isEnabled {
+            loadAppReviewSampleData()
+            return
+        }
+
         isLoading = true
         loadError = nil
         defer { isLoading = false }
@@ -122,6 +127,19 @@ final class HomeOrchestrationStore {
         } else {
             groceryLists = [GroceryList.previewList]
         }
+    }
+
+    // MARK: - App Review sample data
+
+    func loadAppReviewSampleData() {
+        eventTask?.cancel()
+        eventTask = nil
+        integrations = AppReviewSampleData.homeIntegrations
+        tasks = AppReviewSampleData.homeTasks
+        groceryLists = AppReviewSampleData.groceryLists
+        isLoading = false
+        isSyncing = nil
+        loadError = nil
     }
 
     // MARK: - Integration Actions

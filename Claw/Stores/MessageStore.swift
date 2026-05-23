@@ -91,11 +91,13 @@ final class MessageStore {
     // MARK: - Subscribe / Unsubscribe
 
     func subscribe() async {
+        guard !AppReviewSampleData.isEnabled else { return }
         _ = try? await client.send(method: GatewayMethod.sessionsSubscribe, params: SessionKeyParams(key: sessionKey))
         _ = try? await client.send(method: GatewayMethod.sessionsMessagesSubscribe, params: SessionKeyParams(key: sessionKey))
     }
 
     func unsubscribe() async {
+        guard !AppReviewSampleData.isEnabled else { return }
         _ = try? await client.send(method: GatewayMethod.sessionsMessagesUnsubscribe, params: SessionKeyParams(key: sessionKey))
     }
 
@@ -106,6 +108,13 @@ final class MessageStore {
     // MARK: - Load (initial page)
 
     func load() async throws {
+        if AppReviewSampleData.isEnabled {
+            messages = AppReviewSampleData.messages(for: sessionKey)
+            hasMore = false
+            loadError = nil
+            return
+        }
+
         isLoading = true
         loadError = nil
         defer { isLoading = false }
@@ -195,6 +204,18 @@ final class MessageStore {
             pendingText: trimmed.isEmpty ? nil : trimmed,
             attachmentNames: attachmentNames
         ))
+
+        if AppReviewSampleData.isEnabled {
+            messages.append(ClawMessage(
+                id: "sample-reply-\(UUID().uuidString)",
+                sessionKey: sessionKey,
+                role: .assistant,
+                content: "Sample mode is active. This reply is generated locally so screenshots never depend on a live gateway or third-party service.",
+                isStreaming: false,
+                createdAt: Date()
+            ))
+            return
+        }
 
         do {
             // Attachment binary is not sent over the WebSocket. Text-extractable files (PDF,

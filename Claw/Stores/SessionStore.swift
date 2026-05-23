@@ -77,9 +77,13 @@ final class SessionStore {
 
     init(client: GatewayClient) {
         self.client = client
-        let cached = loadSessionCache()
-        if !cached.isEmpty { sessions = cached }
-        startEventSubscription()
+        if AppReviewSampleData.isEnabled {
+            loadAppReviewSampleData()
+        } else {
+            let cached = loadSessionCache()
+            if !cached.isEmpty { sessions = cached }
+        }
+        if !AppReviewSampleData.isEnabled { startEventSubscription() }
     }
 
     deinit {
@@ -90,6 +94,11 @@ final class SessionStore {
     // MARK: - Load
 
     func load() async throws {
+        if AppReviewSampleData.isEnabled {
+            loadAppReviewSampleData()
+            return
+        }
+
         isLoading = true
         loadError = nil
         defer { isLoading = false }
@@ -126,6 +135,23 @@ final class SessionStore {
             guard let payload = try? await self.client.send(method: GatewayMethod.sessionsList, params: params) else { return }
             await MainActor.run { try? self.applySessionsList(payload: payload) }
         }
+    }
+
+    // MARK: - App Review sample data
+
+    func loadAppReviewSampleData() {
+        eventTask?.cancel()
+        reloadTask?.cancel()
+        eventTask = nil
+        reloadTask = nil
+        sessions = AppReviewSampleData.sessions
+        availableAgentOptions = [
+            GatewayAgentId.Option(id: "main", label: "Main"),
+            GatewayAgentId.Option(id: "ops", label: "Ops Agent"),
+            GatewayAgentId.Option(id: "security", label: "Security Agent")
+        ]
+        loadError = nil
+        mutationError = nil
     }
 
     // MARK: - Create

@@ -71,6 +71,11 @@ final class MemoryTimelineStore {
     // MARK: - Load
 
     func reload() async {
+        if AppReviewSampleData.isEnabled {
+            loadAppReviewSampleData()
+            return
+        }
+
         isLoading = true
         loadError = nil
         currentOffset = 0
@@ -111,6 +116,23 @@ final class MemoryTimelineStore {
         events.append(contentsOf: parsed)
         currentOffset += parsed.count
         hasMore = parsed.count >= pageSize
+    }
+
+    // MARK: - App Review sample data
+
+    func loadAppReviewSampleData() {
+        events = MemoryTimelineEvent.previewEvents.map { event in
+            var copy = event
+            if copy.source.contains("github") { copy.source = "release-system" }
+            copy.summary = copy.summary.replacingOccurrences(of: " via GitHub Actions", with: "")
+            return copy
+        }
+        relationships = MemoryTimelineEvent.previewRelationships
+        searchResults = []
+        currentQuery = ""
+        currentOffset = events.count
+        hasMore = false
+        loadError = nil
     }
 
     // MARK: - Search

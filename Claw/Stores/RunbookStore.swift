@@ -56,6 +56,10 @@ final class RunbookStore {
     // MARK: - Load
 
     func load() async throws {
+        if AppReviewSampleData.isEnabled {
+            loadAppReviewSampleData()
+            return
+        }
         guard let client else {
             runbooks = Runbook.allSamples
             return
@@ -90,6 +94,13 @@ final class RunbookStore {
             loadError = error
             if runbooks.isEmpty { runbooks = Runbook.allSamples }
         }
+    }
+
+    // MARK: - App Review sample data
+
+    func loadAppReviewSampleData() {
+        runbooks = Runbook.allSamples
+        loadError = nil
     }
 
     // MARK: - Execute

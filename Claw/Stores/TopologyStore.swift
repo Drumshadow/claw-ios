@@ -54,6 +54,10 @@ final class TopologyStore {
 
     /// Kick off the initial load and start the event/refresh loop.
     func start() async {
+        if AppReviewSampleData.isEnabled {
+            loadAppReviewSampleData()
+            return
+        }
         await loadSnapshot()
         startEventSubscription()
         startAutoRefresh()
@@ -61,7 +65,22 @@ final class TopologyStore {
 
     /// Force a one-shot refresh from the gateway.
     func refresh() async {
+        if AppReviewSampleData.isEnabled {
+            loadAppReviewSampleData()
+            return
+        }
         await loadSnapshot()
+    }
+
+    // MARK: - App Review sample data
+
+    func loadAppReviewSampleData() {
+        graph = AppReviewSampleData.topology
+        isLive = false
+        lastError = nil
+        lastRefreshedAt = Date()
+        eventTask?.cancel()
+        refreshTask?.cancel()
     }
 
     // MARK: - Snapshot loading
