@@ -123,7 +123,7 @@ final class MemoryTimelineStore {
     func loadAppReviewSampleData() {
         events = MemoryTimelineEvent.previewEvents.map { event in
             var copy = event
-            if copy.source.contains("github") { copy.source = "release-system" }
+            if copy.source?.contains("github") == true { copy.source = "release-system" }
             copy.summary = copy.summary.replacingOccurrences(of: " via GitHub Actions", with: "")
             return copy
         }
