@@ -33,6 +33,8 @@ final class TopologyStore {
     nonisolated(unsafe) private var eventTask: Task<Void, Never>?
     nonisolated(unsafe) private var refreshTask: Task<Void, Never>?
     private static let refreshInterval: TimeInterval = 30
+    private static let customNodesKey = "topology.customNodes.v1"
+    private var customNodes: [InfraNode] = []
 
     private let decoder = JSONDecoder()
     // Reuse one encoder across all parse calls — JSONEncoder allocation is not
@@ -42,6 +44,10 @@ final class TopologyStore {
 
     init(client: GatewayClient) {
         self.client = client
+        customNodes = Self.loadCustomNodes()
+        if !customNodes.isEmpty {
+            graph = graphWithCustomNodes(.empty)
+        }
     }
 
     deinit {
@@ -71,6 +77,53 @@ final class TopologyStore {
         await loadSnapshot()
     }
 
+    @discardableResult
+    func createResource(
+        kind: InfraNodeKind,
+        label: String,
+        identifier: String,
+        region: String?,
+        group: String?,
+        source: String?,
+        monitorURL: String?
+    ) async -> TopologyResourceCreateResult {
+        let cleanIdentifier = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        let node = makeNode(
+            kind: kind,
+            label: cleanLabel.isEmpty ? cleanIdentifier : cleanLabel,
+            identifier: cleanIdentifier,
+            region: region,
+            group: group,
+            source: source,
+            monitorURL: monitorURL,
+            connectionStatus: "pending"
+        )
+
+        var params: [String: Any] = [
+            "node": nodePayload(node),
+            "kind": kind.rawValue,
+            "label": node.label,
+            "identifier": cleanIdentifier
+        ]
+        if let region, !region.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { params["region"] = region }
+        if let group, !group.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { params["group"] = group }
+        if let source, !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { params["source"] = source }
+        if let monitorURL, !monitorURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { params["monitorURL"] = monitorURL }
+
+        do {
+            let payload = try await client.send(method: GatewayMethod.topologyNodeCreate, params: params)
+            let created = parseNode(from: payload["node"] ?? .object(payload)) ?? nodeWithStatus(node, status: "gateway")
+            upsertNode(created, persistAsCustom: false)
+            return TopologyResourceCreateResult(node: created, isGatewayBacked: true, message: "Connected through the gateway.")
+        } catch {
+            let pending = nodeWithStatus(node, status: "localPending", error: error.localizedDescription)
+            upsertNode(pending, persistAsCustom: true)
+            lastError = "Saved local placeholder. Gateway create is not available yet: \(error.localizedDescription)"
+            return TopologyResourceCreateResult(node: pending, isGatewayBacked: false, message: "Saved locally. Gateway create is not available yet, so this will show as pending until the gateway supports topology.node.create.")
+        }
+    }
+
     // MARK: - App Review sample data
 
     func loadAppReviewSampleData() {
@@ -95,7 +148,7 @@ final class TopologyStore {
                 params: EmptyParams()
             )
             if let parsed = parseGraph(from: payload) {
-                graph = parsed
+                graph = graphWithCustomNodes(parsed)
                 isLive = true
                 lastRefreshedAt = Date()
             }
@@ -126,7 +179,7 @@ final class TopologyStore {
         switch event.name {
         case GatewayEventName.topologySnapshot:
             if let g = parseGraph(from: event.payload) {
-                graph = g
+                graph = graphWithCustomNodes(g)
                 isLive = true
                 lastRefreshedAt = Date()
             }
@@ -233,6 +286,108 @@ final class TopologyStore {
         return dep
     }
 
+    private func parseNode(from value: JSONValue) -> InfraNode? {
+        guard let data = try? encoder.encode(value),
+              let node = try? decoder.decode(InfraNode.self, from: data) else {
+            return nil
+        }
+        return node
+    }
+
+    private func makeNode(
+        kind: InfraNodeKind,
+        label: String,
+        identifier: String,
+        region: String?,
+        group: String?,
+        source: String?,
+        monitorURL: String?,
+        connectionStatus: String
+    ) -> InfraNode {
+        let safeId = identifier.isEmpty ? UUID().uuidString : identifier
+        var node = InfraNode(
+            id: "custom-\(kind.rawValue)-\(safeId.slugifiedForInfraId)",
+            kind: kind,
+            label: label.isEmpty ? kind.label : label,
+            group: group?.nilIfBlank,
+            health: .unknown,
+            posX: 0.5,
+            posY: 0.5,
+            tags: [
+                "identifier": identifier,
+                "source": source?.nilIfBlank ?? "manual",
+                "connectionStatus": connectionStatus
+            ].compactMapValues { $0 },
+            incidentCount: 0
+        )
+        node.region = region?.nilIfBlank
+        if let monitorURL = monitorURL?.nilIfBlank { node.tags["monitorURL"] = monitorURL }
+        return node
+    }
+
+    private func nodeWithStatus(_ node: InfraNode, status: String, error: String? = nil) -> InfraNode {
+        var copy = node
+        copy.tags["connectionStatus"] = status
+        if let error { copy.tags["gatewayError"] = error }
+        copy.lastSeenAt = Date()
+        return copy
+    }
+
+    private func nodePayload(_ node: InfraNode) -> [String: Any] {
+        var payload: [String: Any] = [
+            "id": node.id,
+            "kind": node.kind.rawValue,
+            "label": node.label,
+            "health": node.health.rawValue,
+            "posX": node.posX,
+            "posY": node.posY,
+            "tags": node.tags,
+            "incidentCount": node.incidentCount
+        ]
+        if let group = node.group { payload["group"] = group }
+        if let region = node.region { payload["region"] = region }
+        return payload
+    }
+
+    private func upsertNode(_ node: InfraNode, persistAsCustom: Bool) {
+        var updated = graph
+        if let idx = updated.nodes.firstIndex(where: { $0.id == node.id }) {
+            updated.nodes[idx] = node
+        } else {
+            updated.nodes.append(node)
+        }
+        graph = updated
+
+        if persistAsCustom {
+            if let idx = customNodes.firstIndex(where: { $0.id == node.id }) {
+                customNodes[idx] = node
+            } else {
+                customNodes.append(node)
+            }
+            Self.saveCustomNodes(customNodes)
+        }
+    }
+
+    private func graphWithCustomNodes(_ base: InfraGraph) -> InfraGraph {
+        guard !customNodes.isEmpty else { return base }
+        var merged = base
+        for node in customNodes where !merged.nodes.contains(where: { $0.id == node.id }) {
+            merged.nodes.append(node)
+        }
+        return merged
+    }
+
+    private static func loadCustomNodes() -> [InfraNode] {
+        guard let data = UserDefaults.standard.data(forKey: customNodesKey),
+              let nodes = try? JSONDecoder().decode([InfraNode].self, from: data) else { return [] }
+        return nodes
+    }
+
+    private static func saveCustomNodes(_ nodes: [InfraNode]) {
+        guard let data = try? JSONEncoder().encode(nodes) else { return }
+        UserDefaults.standard.set(data, forKey: customNodesKey)
+    }
+
     private func doubleFrom(_ v: JSONValue) -> Double? {
         switch v {
         case .double(let d): return d
@@ -253,3 +408,23 @@ final class TopologyStore {
 // MARK: - Empty params helper
 
 private struct EmptyParams: Encodable {}
+
+struct TopologyResourceCreateResult {
+    let node: InfraNode
+    let isGatewayBacked: Bool
+    let message: String
+}
+
+private extension String {
+    var nilIfBlank: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    var slugifiedForInfraId: String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
+        let scalars = unicodeScalars.map { allowed.contains($0) ? Character(String($0)) : "-" }
+        let slug = String(scalars).trimmingCharacters(in: CharacterSet(charactersIn: "-_."))
+        return slug.isEmpty ? UUID().uuidString : slug.lowercased()
+    }
+}

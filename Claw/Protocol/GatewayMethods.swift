@@ -77,6 +77,7 @@ enum GatewayMethod {
 
     static let topologySnapshot = "topology.snapshot"
     static let topologySubscribe = "topology.subscribe"
+    static let topologyNodeCreate = "topology.node.create"
 
     static let modelsList = "models.list"
     static let modelsCapabilities = "models.capabilities"

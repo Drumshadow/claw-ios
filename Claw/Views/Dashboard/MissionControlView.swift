@@ -22,6 +22,7 @@ struct MissionControlView: View {
     @State private var showLayoutPicker: Bool = false
     @State private var showRenameSheet: Bool = false
     @State private var renameText: String = ""
+    @State private var resourceSetupKind: InfraNodeKind?
 
     enum DashboardTab: String, CaseIterable {
         case overview  = "overview"
@@ -72,6 +73,9 @@ struct MissionControlView: View {
         .toolbar { toolbarContent }
         .sheet(isPresented: $showAddWidget) { addWidgetSheet }
         .sheet(isPresented: $showRenameSheet) { renameSheet }
+        .sheet(item: $resourceSetupKind) { kind in
+            ResourceSetupSheet(kind: kind, topologyStore: topologyStore)
+        }
         .confirmationDialog("Dashboards", isPresented: $showLayoutPicker, titleVisibility: .visible) {
             ForEach(Array(dashboardStore.layouts.enumerated()), id: \.element.id) { idx, layout in
                 Button(layout.name) {
@@ -151,6 +155,14 @@ struct MissionControlView: View {
                 ForEach(layout, id: \.widget.id) { item in
                     widgetView(for: item.widget)
                         .frame(maxWidth: .infinity)
+                        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .onTapGesture {
+                            guard !isEditMode, let kind = item.widget.kind.connectableNodeKind else { return }
+                            resourceSetupKind = kind
+                        }
+                        .overlay(alignment: .bottomTrailing) {
+                            connectHint(for: item.widget)
+                        }
                         .overlay(alignment: .topTrailing) {
                             if isEditMode {
                                 editOverlay(widget: item.widget)
@@ -579,6 +591,24 @@ struct MissionControlView: View {
         .offset(x: -8, y: 8)
     }
 
+    @ViewBuilder
+    private func connectHint(for widget: DashboardWidget) -> some View {
+        if !isEditMode,
+           let kind = widget.kind.connectableNodeKind,
+           !topologyStore.graph.nodes.contains(where: { $0.kind == kind }) {
+            HStack(spacing: 4) {
+                Image(systemName: "link.badge.plus")
+                Text("Tap to connect")
+            }
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(Color.clawAccent)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(Color.clawAccent.opacity(0.14)))
+            .padding(10)
+        }
+    }
+
     private var hiddenWidgetsSection: some View {
         let hidden = dashboardStore.activeLayout.widgets.filter { $0.isHidden }
         return Group {
@@ -804,6 +834,161 @@ struct MissionControlView: View {
         if e < 60  { return "\(Int(e))s ago" }
         if e < 3600 { return "\(Int(e/60))m ago" }
         return "\(Int(e/3600))h ago"
+    }
+}
+
+// MARK: - Resource setup
+
+private extension WidgetKind {
+    var connectableNodeKind: InfraNodeKind? {
+        switch self {
+        case .ec2Health:       return .ec2
+        case .containerHealth: return .container
+        case .lambdaActivity:  return .lambda
+        case .rdsMetrics:      return .rds
+        case .redisMetrics:    return .redis
+        case .queueDepth:      return .queue
+        case .datadogAlerts:   return .datadogAlert
+        case .topologyMini:    return .service
+        default:               return nil
+        }
+    }
+}
+
+private struct ResourceSetupSheet: View {
+    let kind: InfraNodeKind
+    let topologyStore: TopologyStore
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var identifier = ""
+    @State private var region = ""
+    @State private var group = ""
+    @State private var source = ""
+    @State private var monitorURL = ""
+    @State private var isSaving = false
+    @State private var resultMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField(defaultNamePlaceholder, text: $name)
+                    TextField(identifierPlaceholder, text: $identifier)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Environment / group, e.g. production", text: $group)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Region, e.g. us-east-1", text: $region)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                } header: {
+                    Text("Resource")
+                } footer: {
+                    Text("This connects the widget to a topology node. The gateway can enrich it with live metrics; until then it appears as a pending manual resource.")
+                }
+
+                Section {
+                    TextField(sourcePlaceholder, text: $source)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Monitor URL or dashboard link", text: $monitorURL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                } header: {
+                    Text("Live data source")
+                } footer: {
+                    Text("Use an AWS identifier/ARN, Datadog monitor, Prometheus target, NATS subject, or whatever the gateway connector understands for this resource.")
+                }
+
+                if let resultMessage {
+                    Section {
+                        Text(resultMessage)
+                            .font(.caption)
+                            .foregroundStyle(Color.clawMuted)
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color.clawBg)
+            .navigationTitle("Connect \(kind.label)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.clawBgAccent, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                        .tint(Color.clawMuted)
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(isSaving ? "Connecting…" : "Connect") { Task { await connect() } }
+                        .fontWeight(.semibold)
+                        .tint(Color.clawAccent)
+                        .disabled(identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationBackground(Color.clawBg)
+    }
+
+    private var defaultNamePlaceholder: String {
+        switch kind {
+        case .rds: return "Primary database"
+        case .redis: return "Redis cache"
+        case .queue, .nats: return "Event queue"
+        case .ec2: return "API host"
+        case .container, .kubernetes: return "API container"
+        case .lambda: return "Image processor"
+        case .datadogAlert: return "Datadog monitor"
+        default: return "\(kind.label) name"
+        }
+    }
+
+    private var identifierPlaceholder: String {
+        switch kind {
+        case .rds: return "DB identifier or ARN"
+        case .redis: return "Cluster id or endpoint"
+        case .queue, .nats: return "Queue/subject name or ARN"
+        case .ec2: return "Instance id, ASG, or hostname"
+        case .container, .kubernetes: return "Container, service, or namespace"
+        case .lambda: return "Function name or ARN"
+        case .datadogAlert: return "Monitor id"
+        default: return "Resource id"
+        }
+    }
+
+    private var sourcePlaceholder: String {
+        switch kind {
+        case .datadogAlert: return "datadog"
+        case .rds, .ec2, .lambda, .redis, .queue, .s3: return "aws"
+        case .container, .kubernetes: return "docker / kubernetes"
+        case .nats: return "nats"
+        default: return "gateway connector"
+        }
+    }
+
+    private func connect() async {
+        isSaving = true
+        resultMessage = nil
+        defer { isSaving = false }
+
+        let result = await topologyStore.createResource(
+            kind: kind,
+            label: name,
+            identifier: identifier,
+            region: region,
+            group: group,
+            source: source.isEmpty ? sourcePlaceholder : source,
+            monitorURL: monitorURL
+        )
+        resultMessage = result.message
+        if result.isGatewayBacked {
+            dismiss()
+        }
     }
 }
 
