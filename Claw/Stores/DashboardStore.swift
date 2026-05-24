@@ -150,4 +150,16 @@ final class DashboardStore {
             totalCostTodayUsd: AppReviewSampleData.sessions.reduce(0) { $0 + ($1.estimatedCostUsd ?? 0) }
         )
     }
+
+    func clearAppReviewSampleData() {
+        if config.layouts.count == 1, config.layouts.first?.name == "App Review" {
+            config = .default
+        }
+        activeSessions = 0
+        runningAgents = 0
+        pendingApprovals = 0
+        cronRecentFailures = 0
+        totalTokensToday = 0
+        totalCostTodayUsd = 0
+    }
 }

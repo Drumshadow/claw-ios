@@ -144,6 +144,10 @@ struct MissionControlView: View {
                 let visible = dashboardStore.activeLayout.visibleWidgets
                 let layout  = computeGridLayout(visible)
 
+                if visible.isEmpty {
+                    dashboardEmptyState
+                }
+
                 ForEach(layout, id: \.widget.id) { item in
                     widgetView(for: item.widget)
                         .frame(maxWidth: .infinity)
@@ -530,6 +534,39 @@ struct MissionControlView: View {
 
     // MARK: - Edit mode overlay
 
+    private var dashboardEmptyState: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "square.grid.2x2")
+                .font(.system(size: 44))
+                .foregroundStyle(Color.clawMuted.opacity(0.3))
+            Text("Build Your Ops Dashboard")
+                .font(.headline)
+                .foregroundStyle(Color.clawTextStrong)
+            Text("Add widgets for sessions, approvals, topology health, incidents, deployments, cost, and custom layouts. Sample widgets only appear when App Review Sample Data is enabled.")
+                .font(.subheadline)
+                .foregroundStyle(Color.clawMuted)
+                .multilineTextAlignment(.center)
+            Button {
+                showAddWidget = true
+            } label: {
+                Label("Add Widget", systemImage: "plus.circle.fill")
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Color.clawAccent)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.clawCard)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(Color.clawBorder, lineWidth: 1)
+                )
+        )
+    }
+
     private func editOverlay(widget: DashboardWidget) -> some View {
         Button {
             dashboardStore.removeWidget(id: widget.id)
@@ -607,13 +644,11 @@ struct MissionControlView: View {
         // Edit / Add (right)
         ToolbarItemGroup(placement: .navigationBarTrailing) {
             if selectedTab == .overview {
-                if isEditMode {
-                    Button {
-                        showAddWidget = true
-                    } label: {
-                        Image(systemName: "plus.circle")
-                            .tint(Color.clawAccent)
-                    }
+                Button {
+                    showAddWidget = true
+                } label: {
+                    Image(systemName: "plus.circle")
+                        .tint(Color.clawAccent)
                 }
                 Button {
                     withAnimation { isEditMode.toggle() }

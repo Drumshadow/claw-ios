@@ -40,7 +40,7 @@ final class SessionStore {
     private func loadSessionCache() -> [ClawSession] {
         guard let data = UserDefaults.standard.data(forKey: Self.sessionCacheKey),
               let sessions = try? JSONDecoder().decode([ClawSession].self, from: data) else { return [] }
-        return sessions
+        return sessions.filter { !$0.id.hasPrefix("sample-") }
     }
 
     private func saveSessionCache(_ sessions: [ClawSession]) {

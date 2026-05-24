@@ -75,14 +75,14 @@ final class HomeOrchestrationStore {
             method: GatewayMethod.homeIntegrationsList,
             params: EmptyParams()
         ) else {
-            integrations = HomeIntegration.previewIntegrations
+            integrations = []
             return
         }
 
         if let arr = payload["integrations"], case .array(let items) = arr {
             integrations = items.compactMap { parseIntegration($0) }
         } else {
-            integrations = HomeIntegration.previewIntegrations
+            integrations = []
         }
     }
 
@@ -91,7 +91,7 @@ final class HomeOrchestrationStore {
             method: GatewayMethod.homeTasksList,
             params: EmptyParams()
         ) else {
-            tasks = HomeTask.previewTasks
+            tasks = []
             return
         }
 
@@ -99,7 +99,7 @@ final class HomeOrchestrationStore {
             tasks = items.compactMap { parseTask($0) }
                 .sorted { $0.createdAt > $1.createdAt }
         } else {
-            tasks = HomeTask.previewTasks
+            tasks = []
         }
     }
 
@@ -108,7 +108,7 @@ final class HomeOrchestrationStore {
             method: GatewayMethod.homeGroceriesList,
             params: EmptyParams()
         ) else {
-            groceryLists = [GroceryList.previewList]
+            groceryLists = []
             return
         }
 
@@ -125,7 +125,7 @@ final class HomeOrchestrationStore {
                 integrationId: nil
             )]
         } else {
-            groceryLists = [GroceryList.previewList]
+            groceryLists = []
         }
     }
 

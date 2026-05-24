@@ -58,6 +58,7 @@ enum GatewayMethod {
     static let phoneResponse = "phone.response"
 
     static let terminalSessionsList = "terminal.sessions.list"
+    static let terminalSessionCreate = "terminal.session.create"
     static let terminalSessionSubscribe = "terminal.session.subscribe"
     static let terminalSessionUnsubscribe = "terminal.session.unsubscribe"
     static let terminalSessionHistory = "terminal.session.history"
@@ -66,6 +67,7 @@ enum GatewayMethod {
     static let terminalSessionKill = "terminal.session.kill"
 
     static let runbooksList = "runbooks.list"
+    static let runbooksCreate = "runbooks.create"
     static let runbooksExecute = "runbooks.execute"
     static let runbooksExecutionStatus = "runbooks.execution.status"
     static let runbooksExecutionApprove = "runbooks.execution.approve"

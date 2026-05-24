@@ -370,6 +370,15 @@ struct InfraGraph: Codable {
         return .ok
     }
 
+    static let empty = InfraGraph(
+        nodes: [],
+        edges: [],
+        incidents: [],
+        deployments: [],
+        snapshotAt: Date(),
+        version: 0
+    )
+
     // MARK: - Rich preview / mock data
 
     static let preview: InfraGraph = {

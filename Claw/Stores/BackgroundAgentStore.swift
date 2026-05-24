@@ -76,8 +76,7 @@ final class BackgroundAgentStore {
             method: GatewayMethod.backgroundAgentsList,
             params: EmptyParams()
         ) else {
-            // Backend not available — load preview data
-            watchers = BackgroundWatcher.previewWatchers
+            watchers = []
             return
         }
 
@@ -94,7 +93,7 @@ final class BackgroundAgentStore {
             method: GatewayMethod.incidentsList,
             params: EmptyParams()
         ) else {
-            incidents = Incident.previewIncidents
+            incidents = []
             return
         }
 

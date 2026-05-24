@@ -10,6 +10,7 @@ struct TerminalSessionListView: View {
 
     @State private var searchText: String = ""
     @State private var showOnlyLive: Bool = false
+    @State private var showCreateTerminal = false
 
     private var liveSessions: [TerminalSession] {
         filtered.filter { $0.status.isLive }
@@ -20,7 +21,7 @@ struct TerminalSessionListView: View {
     }
 
     private var filtered: [TerminalSession] {
-        let sessions = store?.sessions ?? TerminalSession.sampleSessions
+        let sessions = store?.sessions ?? (AppReviewSampleData.isEnabled ? TerminalSession.sampleSessions : [])
         var result = sessions
 
         if showOnlyLive {
@@ -50,6 +51,18 @@ struct TerminalSessionListView: View {
             }
         }
         .searchable(text: $searchText, prompt: "Search sessions…")
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    showCreateTerminal = true
+                } label: {
+                    Label("New Terminal", systemImage: "plus.circle.fill")
+                }
+            }
+        }
+        .sheet(isPresented: $showCreateTerminal) {
+            CreateTerminalSessionSheet(store: store)
+        }
         .task { try? await store?.load() }
     }
 
@@ -116,11 +129,19 @@ struct TerminalSessionListView: View {
             Text("No Terminal Sessions")
                 .font(.headline)
                 .foregroundStyle(Color.clawTextStrong)
-            Text("Terminal sessions will appear here when the agent opens a shell or runs a command.")
+            Text("Start a command-backed terminal, or ask an agent to open a shell. Sessions and replay history appear here once the gateway reports them.")
                 .font(.subheadline)
                 .foregroundStyle(Color.clawMuted)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
+            Button {
+                showCreateTerminal = true
+            } label: {
+                Label("Start Terminal", systemImage: "terminal.fill")
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Color.clawAccent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clawBg)
@@ -137,6 +158,87 @@ struct TerminalSessionListView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clawBg)
+    }
+}
+
+private struct CreateTerminalSessionSheet: View {
+    let store: TerminalSessionStore?
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var title = ""
+    @State private var command = ""
+    @State private var nodeId = ""
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Health check", text: $title)
+                    TextField("Optional runner/node id", text: $nodeId)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                } header: {
+                    Text("Session")
+                }
+
+                Section {
+                    TextField("docker ps", text: $command, axis: .vertical)
+                        .font(.system(.body, design: .monospaced))
+                        .lineLimit(3...8)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                } header: {
+                    Text("Command")
+                } footer: {
+                    Text("The gateway owns execution and approval policy. The app only requests a terminal session and streams the result.")
+                }
+
+                if let errorMessage {
+                    Section {
+                        Text(errorMessage)
+                            .font(.caption)
+                            .foregroundStyle(Color.clawDanger)
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color.clawBg)
+            .navigationTitle("Start Terminal")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(isSaving ? "Starting…" : "Start") { Task { await create() } }
+                        .disabled(command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func create() async {
+        guard let store else {
+            errorMessage = "Connect to a gateway before starting terminals."
+            return
+        }
+        isSaving = true
+        errorMessage = nil
+        defer { isSaving = false }
+
+        do {
+            _ = try await store.createSession(
+                title: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? command : title,
+                command: command,
+                nodeId: nodeId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : nodeId
+            )
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 }
 

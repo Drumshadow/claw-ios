@@ -1153,13 +1153,12 @@ private struct AnimatedDotsView: View {
 struct ModelPickerSheet: View {
     let client: GatewayClient
     let currentModel: String?
-    @State private var availableModels: [String] = []
+    @State private var availableModels: [ModelPickerOption] = []
     @State private var selectedModel: String = ""
     @State private var thinkingBudget: String = UserDefaults.standard.string(forKey: "claw.thinkingBudget") ?? "medium"
     @State private var isLoading = true
+    @State private var loadError: String?
     @Environment(\.dismiss) private var dismiss
-
-    private let fallbackModels = ["claude-opus-4-7", "claude-opus-4-5", "claude-sonnet-4-6", "claude-sonnet-4-5", "claude-haiku-4-5"]
 
     var body: some View {
         NavigationStack {
@@ -1167,23 +1166,33 @@ struct ModelPickerSheet: View {
                 Section {
                     if isLoading {
                         ProgressView().frame(maxWidth: .infinity)
+                    } else if availableModels.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("No models reported by gateway", systemImage: "cpu")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Color.clawTextStrong)
+                            Text(loadError ?? "The model picker now uses the live gateway model catalog. Add or enable models in the gateway, then tap Refresh.")
+                                .font(.caption)
+                                .foregroundStyle(Color.clawMuted)
+                        }
+                        .padding(.vertical, 8)
                     } else {
                         ForEach(availableModels, id: \.self) { model in
                             Button {
-                                selectedModel = model
-                                Task { await updateModel(model) }
+                                selectedModel = model.id
+                                Task { await updateModel(model.id) }
                             } label: {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(model)
+                                        Text(model.name)
                                             .font(.system(size: 14))
                                             .foregroundStyle(Color.clawText)
-                                        Text(modelDescription(model))
+                                        Text(model.subtitle)
                                             .font(.caption2)
                                             .foregroundStyle(Color.clawMuted)
                                     }
                                     Spacer()
-                                    if model == selectedModel {
+                                    if model.id == selectedModel {
                                         Image(systemName: "checkmark")
                                             .foregroundStyle(Color.clawAccent)
                                             .font(.system(size: 13, weight: .semibold))
@@ -1196,6 +1205,18 @@ struct ModelPickerSheet: View {
                     }
                 } header: {
                     Text("Model").foregroundStyle(Color.clawMuted).font(.caption)
+                }
+
+                Section {
+                    Button {
+                        Task { await loadConfig() }
+                    } label: {
+                        Label("Refresh Model Catalog", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(isLoading)
+                } footer: {
+                    Text("This list is loaded from models.list/config.get, not a hardcoded app list. If a model is missing, fix the gateway config rather than the iOS app.")
+                        .foregroundStyle(Color.clawMuted)
                 }
 
                 Section {
@@ -1249,18 +1270,26 @@ struct ModelPickerSheet: View {
 
     private func loadConfig() async {
         isLoading = true
+        loadError = nil
         selectedModel = currentModel ?? ""
+
+        var discovered: [ModelPickerOption] = []
+        struct ModelsListParams: Encodable { let view: String }
+        if let payload = try? await client.send(method: GatewayMethod.modelsList, params: ModelsListParams(view: "configured")) {
+            discovered.append(contentsOf: parseModelOptions(from: payload))
+        } else {
+            loadError = "Could not load models.list from the gateway."
+        }
+
         if let payload = try? await client.send(method: GatewayMethod.configGet, params: EmptyParams()) {
-            if let modelsVal = payload["availableModels"] ?? payload["models"],
-               case .array(let arr) = modelsVal {
-                availableModels = arr.compactMap { if case .string(let s) = $0 { return s } else { return nil } }
-            }
+            discovered.append(contentsOf: parseModelOptions(from: payload))
             if let modelVal = payload["model"], case .string(let m) = modelVal, !m.isEmpty {
                 selectedModel = m
             }
         }
-        if availableModels.isEmpty { availableModels = fallbackModels }
-        if selectedModel.isEmpty, let first = availableModels.first { selectedModel = first }
+
+        availableModels = uniqueOptions(discovered)
+        if selectedModel.isEmpty, let first = availableModels.first { selectedModel = first.id }
         isLoading = false
     }
 
@@ -1274,11 +1303,67 @@ struct ModelPickerSheet: View {
         _ = try? await client.send(method: GatewayMethod.configPatch, params: BudgetPatch(thinkingBudget: budget))
     }
 
-    private func modelDescription(_ model: String) -> String {
-        if model.contains("opus") { return "Most capable" }
-        if model.contains("sonnet") { return "Balanced" }
-        if model.contains("haiku") { return "Fast & efficient" }
-        return ""
+    private func parseModelOptions(from payload: [String: JSONValue]) -> [ModelPickerOption] {
+        let candidates = [payload["models"], payload["availableModels"], payload["configuredModels"], payload["aliases"]].compactMap { $0 }
+        return candidates.flatMap { value -> [ModelPickerOption] in
+            switch value {
+            case .array(let arr):
+                return arr.compactMap(parseModelOption)
+            case .object(let obj):
+                return obj.compactMap { key, val in
+                    if let option = parseModelOption(val) { return option }
+                    if case .string(let target) = val {
+                        return ModelPickerOption(id: key, name: key, provider: target, isAvailable: true)
+                    }
+                    return nil
+                }
+            default:
+                return []
+            }
+        }
+    }
+
+    private func parseModelOption(_ value: JSONValue) -> ModelPickerOption? {
+        switch value {
+        case .string(let id):
+            return ModelPickerOption(id: id, name: id, provider: providerName(for: id), isAvailable: true)
+        case .object(let obj):
+            guard let id = obj["id"]?.stringValue
+                ?? obj["model"]?.stringValue
+                ?? obj["modelId"]?.stringValue
+                ?? obj["name"]?.stringValue
+            else { return nil }
+            let name = obj["displayName"]?.stringValue
+                ?? obj["label"]?.stringValue
+                ?? obj["name"]?.stringValue
+                ?? id
+            let provider = obj["provider"]?.stringValue
+                ?? obj["modelProvider"]?.stringValue
+                ?? providerName(for: id)
+            let available = obj["isAvailable"]?.boolValue ?? obj["available"]?.boolValue ?? true
+            return ModelPickerOption(id: id, name: name, provider: provider, isAvailable: available)
+        default:
+            return nil
+        }
+    }
+
+    private func uniqueOptions(_ options: [ModelPickerOption]) -> [ModelPickerOption] {
+        var seen = Set<String>()
+        return options.filter { option in
+            guard !seen.contains(option.id) else { return false }
+            seen.insert(option.id)
+            return true
+        }.sorted { lhs, rhs in
+            if lhs.isAvailable != rhs.isAvailable { return lhs.isAvailable && !rhs.isAvailable }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    private func providerName(for model: String) -> String {
+        if let prefix = model.split(separator: "/").first { return String(prefix) }
+        if model.contains("claude") { return "anthropic" }
+        if model.contains("gpt") { return "openai" }
+        return "gateway"
     }
 
     private func budgetDescription(_ level: String) -> String {
@@ -1288,5 +1373,18 @@ struct ModelPickerSheet: View {
         case "high": return "~32k tokens — deep analysis"
         default: return ""
         }
+    }
+}
+
+private struct ModelPickerOption: Hashable {
+    let id: String
+    let name: String
+    let provider: String
+    let isAvailable: Bool
+
+    var subtitle: String {
+        var parts = [provider]
+        if !isAvailable { parts.append("offline") }
+        return parts.joined(separator: " • ")
     }
 }

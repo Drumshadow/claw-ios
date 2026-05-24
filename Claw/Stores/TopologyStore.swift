@@ -13,8 +13,7 @@ import Foundation
 //   Event:    "topology.incident.closed"  — { id: String }
 //   Event:    "topology.deployment.updated" — DeploymentEvent JSON
 //
-// When the gateway doesn't support topology, the store falls back to
-// InfraGraph.preview so the UI always has something useful to display.
+// Sample topology is shown only when App Review Sample Data is enabled.
 
 @Observable
 @MainActor
@@ -22,7 +21,7 @@ final class TopologyStore {
 
     // MARK: - Published state
 
-    private(set) var graph: InfraGraph = .preview
+    private(set) var graph: InfraGraph = .empty
     private(set) var isLoading: Bool = false
     private(set) var lastError: String?
     private(set) var isLive: Bool = false      // true when receiving real gateway data
@@ -101,11 +100,10 @@ final class TopologyStore {
                 lastRefreshedAt = Date()
             }
         } catch {
-            // Non-fatal: fall back to preview / retain last known graph
+            // Non-fatal: retain last known graph; don't inject sample topology in live mode.
             lastError = error.localizedDescription
             if !isLive {
-                // First load failed — use preview so the UI isn't empty
-                graph = .preview
+                graph = .empty
             }
         }
     }

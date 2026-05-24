@@ -309,7 +309,12 @@ struct SettingsView: View {
                 set: { enabled in
                     sampleModeEnabled = enabled
                     AppReviewSampleData.isEnabled = enabled
-                    if enabled { loadAppReviewSamples() }
+                    if enabled {
+                        loadAppReviewSamples()
+                    } else {
+                        sampleModeLoaded = false
+                        reloadLiveDataAfterSampleModeDisabled()
+                    }
                 }
             )) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -336,6 +341,7 @@ struct SettingsView: View {
                     sampleModeEnabled = false
                     sampleModeLoaded = false
                     AppReviewSampleData.disable()
+                    reloadLiveDataAfterSampleModeDisabled()
                 } label: {
                     Label("Turn Off Sample Mode", systemImage: "xmark.circle")
                         .foregroundStyle(Color.clawDanger)
@@ -361,6 +367,18 @@ struct SettingsView: View {
         homeStore?.loadAppReviewSampleData()
         approvalStore?.loadAppReviewSampleData()
         withAnimation { sampleModeLoaded = true }
+    }
+
+    private func reloadLiveDataAfterSampleModeDisabled() {
+        Task {
+            try? await sessionStore?.load()
+            await agentMonitorStore?.refresh()
+            await bgAgentStore?.loadAll()
+            await timelineStore?.reload()
+            try? await terminalSessionStore?.load()
+            try? await runbookStore?.load()
+            await homeStore?.loadAll()
+        }
     }
 
     // MARK: - Power section

@@ -7,6 +7,7 @@ import Foundation
 //
 // Gateway contract:
 //   terminal.sessions.list  → [TerminalSessionPayload]
+//   terminal.session.create → { session: TerminalSessionPayload }
 //   Events: terminal.session.started  { session: TerminalSessionPayload }
 //           terminal.session.ended    { sessionId: String, exitCode: Int? }
 
@@ -58,7 +59,8 @@ final class TerminalSessionStore {
             )
             guard let sessionsVal = response["sessions"],
                   case .array(let arr) = sessionsVal else {
-                sessions = TerminalSession.sampleSessions   // graceful fallback
+                sessions = []
+                saveCache(sessions)
                 return
             }
             let decoder = JSONDecoder()
@@ -75,9 +77,9 @@ final class TerminalSessionStore {
             saveCache(sessions)
         } catch {
             loadError = error
-            // Use cached data if gateway unavailable
+            // Use cached data if gateway unavailable; never inject samples unless sample mode is enabled.
             if sessions.isEmpty {
-                sessions = TerminalSession.sampleSessions
+                sessions = []
             }
         }
     }
@@ -89,6 +91,37 @@ final class TerminalSessionStore {
         eventTask = nil
         sessions = AppReviewSampleData.terminalSessions
         loadError = nil
+    }
+
+    @discardableResult
+    func createSession(title: String, command: String, nodeId: String?) async throws -> TerminalSession {
+        var params: [String: Any] = [
+            "title": title,
+            "command": command,
+        ]
+        if let nodeId, !nodeId.isEmpty { params["nodeId"] = nodeId }
+
+        let response = try await client.send(
+            method: GatewayMethod.terminalSessionCreate,
+            params: params
+        )
+
+        let sessionValue = response["session"] ?? .object(response)
+        guard case .object(let dict) = sessionValue,
+              let data = try? JSONSerialization.data(withJSONObject: dict.asDictionary()),
+              let payload = try? JSONDecoder().decode(TerminalSessionPayload.self, from: data)
+        else {
+            throw TerminalSessionCreateError.invalidResponse
+        }
+
+        let session = payload.toTerminalSession()
+        if let idx = sessions.firstIndex(where: { $0.id == session.id }) {
+            sessions[idx] = session
+        } else {
+            sessions.insert(session, at: 0)
+        }
+        saveCache(sessions)
+        return session
     }
 
     // MARK: - TerminalStore lifecycle
@@ -161,7 +194,7 @@ final class TerminalSessionStore {
         guard let data = UserDefaults.standard.data(forKey: Self.cacheKey),
               let cached = try? JSONDecoder().decode([TerminalSession].self, from: data)
         else { return [] }
-        return cached
+        return cached.filter { !$0.id.hasPrefix("sample-") }
     }
 
     private func saveCache(_ sessions: [TerminalSession]) {
@@ -174,6 +207,14 @@ final class TerminalSessionStore {
 // MARK: - Helpers
 
 private struct EmptyParams: Encodable {}
+
+private enum TerminalSessionCreateError: LocalizedError {
+    case invalidResponse
+
+    var errorDescription: String? {
+        "The gateway did not return a terminal session."
+    }
+}
 
 // Extension to convert [String: JSONValue] → [String: Any] for JSONSerialization
 private extension Dictionary where Key == String, Value == JSONValue {

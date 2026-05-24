@@ -40,6 +40,12 @@ struct DashboardTabView: View {
             if AppReviewSampleData.isEnabled {
                 dashboardStore.loadAppReviewSampleData()
                 topologyStore?.loadAppReviewSampleData()
+            } else {
+                dashboardStore.clearAppReviewSampleData()
+                if let store = topologyStore {
+                    Task { await store.refresh() }
+                }
+                syncLiveData()
             }
         }
     }

@@ -6,6 +6,7 @@ import Foundation
 //
 // Gateway contract:
 //   runbooks.list → [RunbookPayload]
+//   runbooks.create(runbook) → { runbook }
 //   runbooks.execute(runbookId, mode, dryRun) → { executionId }
 //   runbooks.execution.approve(executionId, stepId)
 //   runbooks.execution.deny(executionId, stepId, reason?)
@@ -61,7 +62,7 @@ final class RunbookStore {
             return
         }
         guard let client else {
-            runbooks = Runbook.allSamples
+            runbooks = AppReviewSampleData.isEnabled ? Runbook.allSamples : []
             return
         }
         isLoading = true
@@ -73,7 +74,7 @@ final class RunbookStore {
                 method: GatewayMethod.runbooksList,
                 params: EmptyRunbookParams()
             )
-            // Attempt to decode from gateway; fall back to sample data on schema mismatch
+            // Attempt to decode from gateway; keep empty on schema mismatch unless sample mode is enabled.
             if let listVal = response["runbooks"],
                case .array(let arr) = listVal,
                !arr.isEmpty {
@@ -86,13 +87,13 @@ final class RunbookStore {
                     else { return nil }
                     return rb
                 }
-                runbooks = decoded.isEmpty ? Runbook.allSamples : decoded
+                runbooks = decoded.isEmpty ? [] : decoded
             } else {
-                runbooks = Runbook.allSamples
+                runbooks = []
             }
         } catch {
             loadError = error
-            if runbooks.isEmpty { runbooks = Runbook.allSamples }
+            if runbooks.isEmpty { runbooks = [] }
         }
     }
 
@@ -101,6 +102,28 @@ final class RunbookStore {
     func loadAppReviewSampleData() {
         runbooks = Runbook.allSamples
         loadError = nil
+    }
+
+    @discardableResult
+    func createRunbook(_ runbook: Runbook) async throws -> Runbook {
+        guard let client else {
+            runbooks.insert(runbook, at: 0)
+            return runbook
+        }
+
+        struct CreateRunbookParams: Encodable { let runbook: Runbook }
+        let response = try await client.send(
+            method: GatewayMethod.runbooksCreate,
+            params: CreateRunbookParams(runbook: runbook)
+        )
+
+        let created = parseRunbook(response["runbook"] ?? .object(response)) ?? runbook
+        if let idx = runbooks.firstIndex(where: { $0.id == created.id }) {
+            runbooks[idx] = created
+        } else {
+            runbooks.insert(created, at: 0)
+        }
+        return created
     }
 
     // MARK: - Execute
@@ -344,6 +367,16 @@ final class RunbookStore {
         default:             return nil
         }
     }
+}
+
+private func parseRunbook(_ value: JSONValue) -> Runbook? {
+    guard case .object(let dict) = value,
+          let data = try? JSONSerialization.data(withJSONObject: dict.toAny())
+    else { return nil }
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .secondsSince1970
+    return try? decoder.decode(Runbook.self, from: data)
 }
 
 // MARK: - Helpers

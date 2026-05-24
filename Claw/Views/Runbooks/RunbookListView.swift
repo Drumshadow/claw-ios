@@ -10,11 +10,12 @@ struct RunbookListView: View {
 
     @State private var searchText: String = ""
     @State private var selectedEnvironment: String = "all"
+    @State private var showCreateRunbook = false
 
     private let environmentOptions = ["all", "production", "staging", "dev"]
 
     private var filtered: [Runbook] {
-        let base = store?.runbooks ?? Runbook.allSamples
+        let base = store?.runbooks ?? (AppReviewSampleData.isEnabled ? Runbook.allSamples : [])
         var result = base.filter { $0.isEnabled }
 
         if selectedEnvironment != "all" {
@@ -46,6 +47,18 @@ struct RunbookListView: View {
             }
         }
         .searchable(text: $searchText, prompt: "Search runbooks…")
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    showCreateRunbook = true
+                } label: {
+                    Label("New Runbook", systemImage: "plus.circle.fill")
+                }
+            }
+        }
+        .sheet(isPresented: $showCreateRunbook) {
+            CreateRunbookSheet(store: store)
+        }
         .task { try? await store?.load() }
     }
 
@@ -121,11 +134,19 @@ struct RunbookListView: View {
             Text("No Runbooks")
                 .font(.headline)
                 .foregroundStyle(Color.clawTextStrong)
-            Text("Runbook definitions will load from the gateway. Sample runbooks are shown in preview.")
+            Text("Create a guided command sequence for deploys, restarts, diagnostics, and other repeatable ops work. Samples only appear when App Review Sample Data is enabled.")
                 .font(.subheadline)
                 .foregroundStyle(Color.clawMuted)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
+            Button {
+                showCreateRunbook = true
+            } label: {
+                Label("Create Runbook", systemImage: "plus.circle.fill")
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Color.clawAccent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clawBg)
@@ -142,6 +163,105 @@ struct RunbookListView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clawBg)
+    }
+}
+
+private struct CreateRunbookSheet: View {
+    let store: RunbookStore?
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var name = ""
+    @State private var description = ""
+    @State private var environment = "dev"
+    @State private var command = ""
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    private let environments = ["dev", "staging", "production", "*"]
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Restart API", text: $name)
+                    TextField("What this runbook does", text: $description, axis: .vertical)
+                    Picker("Environment", selection: $environment) {
+                        ForEach(environments, id: \.self) { Text($0 == "*" ? "Any" : $0.capitalized).tag($0) }
+                    }
+                } header: {
+                    Text("Runbook")
+                } footer: {
+                    Text("Runbooks are saved through the gateway so the same catalog is available to the app and agents.")
+                }
+
+                Section {
+                    TextField("ssh host 'docker ps'", text: $command, axis: .vertical)
+                        .font(.system(.body, design: .monospaced))
+                        .lineLimit(3...8)
+                } header: {
+                    Text("First Step")
+                } footer: {
+                    Text("New runbooks start in Manual mode. Dangerous commands still go through gateway approval policy.")
+                }
+
+                if let errorMessage {
+                    Section {
+                        Text(errorMessage)
+                            .font(.caption)
+                            .foregroundStyle(Color.clawDanger)
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color.clawBg)
+            .navigationTitle("Create Runbook")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(isSaving ? "Saving…" : "Save") { Task { await save() } }
+                        .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func save() async {
+        guard let store else {
+            errorMessage = "Connect to a gateway before creating runbooks."
+            return
+        }
+        isSaving = true
+        errorMessage = nil
+        defer { isSaving = false }
+
+        let step = RunbookStep(
+            name: "Run command",
+            description: description,
+            command: command,
+            risk: environment == "production" ? .danger : .caution,
+            checkpointAfter: true,
+            environment: environment
+        )
+        let runbook = Runbook(
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            description: description.trimmingCharacters(in: .whitespacesAndNewlines),
+            environment: environment,
+            executionMode: .manual,
+            steps: [step],
+            tags: ["custom", environment].filter { $0 != "*" },
+            estimatedDurationSeconds: 300
+        )
+
+        do {
+            _ = try await store.createRunbook(runbook)
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 }
 

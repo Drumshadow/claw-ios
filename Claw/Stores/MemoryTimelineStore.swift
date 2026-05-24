@@ -86,9 +86,9 @@ final class MemoryTimelineStore {
             method: GatewayMethod.memoryTimelineList,
             params: TimelineListParams(limit: pageSize, offset: 0, category: selectedCategory?.rawValue)
         ) else {
-            // Backend unavailable → show preview
-            events = MemoryTimelineEvent.previewEvents
-            relationships = MemoryTimelineEvent.previewRelationships
+            // Backend unavailable → show an empty live state unless sample mode is explicitly enabled.
+            events = []
+            relationships = []
             return
         }
 
