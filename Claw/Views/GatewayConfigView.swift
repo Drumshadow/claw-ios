@@ -408,12 +408,14 @@ private struct ConfigPatchEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Patch") {
+                Section {
                     TextEditor(text: $patchText)
                         .font(.system(size: 12, design: .monospaced))
                         .frame(minHeight: 260)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                } header: {
+                    Text("Patch")
                 } footer: {
                     Text("Objects merge recursively, arrays/scalars replace, and null deletes a path. Keep this patch as small as possible.")
                 }
