@@ -6,10 +6,12 @@ import AVFoundation
 struct GatewaySetupView: View {
     @Environment(AppState.self) private var appState
     @Environment(GatewayDiscovery.self) private var discovery
+    @Environment(GatewayStore.self) private var gatewayStore
 
     @State private var showManualEntry = false
     @State private var showQRScanner = false
     @State private var connectingConfig: GatewayConfig?
+    @State private var editingConfig: GatewayConfig?
 
     var body: some View {
         NavigationStack {
@@ -54,15 +56,21 @@ struct GatewaySetupView: View {
                         }
                     }
 
-                    // Last used
-                    if let saved = appState.selectedConfig {
-                        section(title: "Last Used") {
-                            GatewayRow(
-                                name: saved.name,
-                                address: saved.displayAddress,
-                                isConnecting: connectingConfig?.id == saved.id
-                            ) {
-                                connectTo(saved)
+                    // Saved connections
+                    if !gatewayStore.gateways.isEmpty {
+                        section(title: "Saved Connections") {
+                            VStack(spacing: 8) {
+                                ForEach(gatewayStore.gateways) { saved in
+                                    GatewayRow(
+                                        name: saved.name,
+                                        address: saved.displayAddress,
+                                        isConnecting: connectingConfig?.id == saved.id,
+                                        menu: AnyView(savedGatewayMenu(saved))
+                                    ) {
+                                        gatewayStore.setDefault(saved)
+                                        connectTo(saved)
+                                    }
+                                }
                             }
                         }
                     }
@@ -102,15 +110,25 @@ struct GatewaySetupView: View {
             .sheet(isPresented: $showManualEntry) {
                 ManualGatewayEntryView { config in
                     showManualEntry = false
+                    gatewayStore.upsert(config, setDefault: true)
                     connectTo(config)
+                }
+            }
+            .sheet(item: $editingConfig) { config in
+                ManualGatewayEntryView(initialConfig: config, actionTitle: "Save") { updated in
+                    editingConfig = nil
+                    gatewayStore.upsert(updated, setDefault: config.isDefault)
+                    appState.selectedConfig = updated
                 }
             }
             .sheet(isPresented: $showQRScanner) {
                 QRScannerView { config in
                     showQRScanner = false
+                    gatewayStore.upsert(config, setDefault: true)
                     connectTo(config)
                 }
             }
+            .task { migrateLastUsedIntoSavedConnectionsIfNeeded() }
         }
     }
 
@@ -148,9 +166,15 @@ struct GatewaySetupView: View {
                 Image(systemName: "wifi.slash")
                     .foregroundStyle(Color.clawMuted)
             }
-            Text(discovery.isSearching ? "Searching for gateways…" : "No gateways found")
-                .foregroundStyle(Color.clawMuted)
-                .font(.subheadline)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(discovery.isSearching ? "Searching for gateways…" : "No gateways found on this network")
+                    .foregroundStyle(Color.clawText)
+                    .font(.subheadline.weight(.semibold))
+                Text(discovery.isSearching ? "Keep this screen open, or scan a setup QR code." : "Make sure OpenClaw gateway is running, then refresh or add the address manually.")
+                    .foregroundStyle(Color.clawMuted)
+                    .font(.caption)
+                    .lineLimit(2)
+            }
             Spacer()
         }
         .padding(14)
@@ -170,9 +194,15 @@ struct GatewaySetupView: View {
         HStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(Color.clawDanger)
-            Text(reason)
-                .font(.footnote)
-                .foregroundStyle(Color.clawDanger)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Couldn’t connect to the gateway")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Color.clawDanger)
+                Text(reason)
+                    .font(.caption)
+                    .foregroundStyle(Color.clawDanger.opacity(0.9))
+                    .lineLimit(3)
+            }
             Spacer()
         }
         .padding(14)
@@ -188,10 +218,50 @@ struct GatewaySetupView: View {
 
     // MARK: - Connect helper
 
+    private func migrateLastUsedIntoSavedConnectionsIfNeeded() {
+        guard gatewayStore.gateways.isEmpty, let selected = appState.selectedConfig else { return }
+        gatewayStore.upsert(selected, setDefault: true)
+    }
+
+    private func savedGatewayMenu(_ config: GatewayConfig) -> some View {
+        Menu {
+            Button {
+                editingConfig = config
+            } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+
+            Button {
+                gatewayStore.setDefault(config)
+                appState.selectedConfig = config
+            } label: {
+                Label("Set Default", systemImage: "checkmark.circle")
+            }
+
+            Button(role: .destructive) {
+                gatewayStore.remove(config)
+                if appState.selectedConfig?.id == config.id {
+                    appState.selectedConfig = gatewayStore.defaultGateway
+                }
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(Color.clawMuted)
+                .frame(width: 32, height: 32)
+        }
+        .buttonStyle(.plain)
+    }
+
     private func connectTo(_ config: GatewayConfig) {
-        connectingConfig = config
+        var defaulted = config
+        defaulted.isDefault = true
+        connectingConfig = defaulted
+        gatewayStore.upsert(defaulted, setDefault: true)
         Task {
-            await appState.connect(to: config)
+            await appState.connect(to: defaulted)
             await MainActor.run { connectingConfig = nil }
         }
     }
@@ -203,61 +273,69 @@ struct GatewayRow: View {
     let name: String
     let address: String
     let isConnecting: Bool
+    var menu: AnyView? = nil
     let onTap: () -> Void
 
     var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 14) {
-                ZStack {
-                    Circle()
-                        .fill(Color.clawAccentSubtle)
-                        .frame(width: 40, height: 40)
-                    Image(systemName: "dot.radiowaves.left.and.right")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(Color.clawAccent)
-                }
+        HStack(spacing: 14) {
+            Button(action: onTap) {
+                HStack(spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.clawAccentSubtle)
+                            .frame(width: 40, height: 40)
+                        Image(systemName: "dot.radiowaves.left.and.right")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(Color.clawAccent)
+                    }
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(name)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color.clawTextStrong)
-                    Text(address)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.clawMuted)
-                }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(name)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color.clawTextStrong)
+                        Text(address)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.clawMuted)
+                    }
 
-                Spacer()
-
-                if isConnecting {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .scaleEffect(0.8)
-                        .tint(Color.clawAccent)
-                } else {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.clawMuted.opacity(0.6))
+                    Spacer()
                 }
+                .contentShape(Rectangle())
             }
-            .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.clawCard)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Color.clawBorder, lineWidth: 1)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .buttonStyle(.plain)
+            .disabled(isConnecting)
+
+            if isConnecting {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .scaleEffect(0.8)
+                    .tint(Color.clawAccent)
+            } else if let menu {
+                menu
+            } else {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.clawMuted.opacity(0.6))
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(isConnecting)
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.clawCard)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.clawBorder, lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
 // MARK: - ManualGatewayEntryView
 
 struct ManualGatewayEntryView: View {
+    var initialConfig: GatewayConfig? = nil
+    var actionTitle: String = "Connect"
     let onConnect: (GatewayConfig) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -265,6 +343,7 @@ struct ManualGatewayEntryView: View {
     @State private var portText: String = "18789"
     @State private var name: String = ""
     @State private var isSecure: Bool = true
+    @State private var didInitialize = false
     @FocusState private var focusedField: Field?
 
     private enum Field { case name, host, port }
@@ -334,16 +413,18 @@ struct ManualGatewayEntryView: View {
                         .tint(Color.clawMuted)
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Connect") {
+                    Button(actionTitle) {
                         let trimmedHost = host.trimmingCharacters(in: .whitespaces)
                         let port = Int(portText) ?? 18789
                         let displayName = name.trimmingCharacters(in: .whitespaces).isEmpty
                             ? trimmedHost
                             : name.trimmingCharacters(in: .whitespaces)
                         let config = GatewayConfig(
+                            id: initialConfig?.id ?? UUID(),
                             name: displayName,
                             host: trimmedHost,
                             port: port,
+                            isDefault: initialConfig?.isDefault ?? false,
                             isSecure: isSecure
                         )
                         onConnect(config)
@@ -353,7 +434,20 @@ struct ManualGatewayEntryView: View {
                     .tint(Color.clawAccent)
                 }
             }
-            .onAppear { focusedField = .host }
+            .onAppear { initializeFieldsIfNeeded() }
+        }
+    }
+
+    private func initializeFieldsIfNeeded() {
+        guard !didInitialize else { return }
+        didInitialize = true
+        if let initialConfig {
+            name = initialConfig.name
+            host = initialConfig.host
+            portText = String(initialConfig.port)
+            isSecure = initialConfig.isSecure
+        } else {
+            focusedField = .host
         }
     }
 

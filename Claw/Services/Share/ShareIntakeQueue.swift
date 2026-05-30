@@ -124,7 +124,11 @@ final class ShareIntakeQueue {
     private func saveToDisk() {
         do {
             let data = try encoder.encode(items)
-            try data.write(to: queueFileURL, options: [.atomic])
+            var options: Data.WritingOptions = [.atomic]
+            #if os(iOS)
+            options.insert(.completeFileProtection)
+            #endif
+            try data.write(to: queueFileURL, options: options)
         } catch {
             // Non-fatal — queue still works in-memory
             #if DEBUG

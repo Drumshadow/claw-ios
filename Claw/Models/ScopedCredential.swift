@@ -104,6 +104,7 @@ final class ScopedCredentialStore {
     private(set) var credentials: [ScopedCredential] = []
 
     private static let userDefaultsKey = "ai.clawos.scopedCredentials"
+    private static let keychainMetadataKey = "ai.clawos.scopedCredentials.metadata"
 
     private init() {
         credentials = loadCredentials()
@@ -112,7 +113,7 @@ final class ScopedCredentialStore {
 
     // MARK: - CRUD
 
-    /// Creates a new scoped credential. Token is stored in Keychain; metadata in UserDefaults.
+    /// Creates a new scoped credential. Token and metadata are stored in Keychain.
     func create(
         name: String,
         description: String,
@@ -190,14 +191,24 @@ final class ScopedCredentialStore {
     }
 
     private func loadCredentials() -> [ScopedCredential] {
-        guard let data = UserDefaults.standard.data(forKey: Self.userDefaultsKey),
-              let decoded = try? JSONDecoder().decode([ScopedCredential].self, from: data)
+        if let data = try? KeychainStore.load(key: Self.keychainMetadataKey),
+           let decoded = try? JSONDecoder().decode([ScopedCredential].self, from: data) {
+            return decoded
+        }
+
+        // Migration path for older builds that stored non-token metadata in UserDefaults.
+        guard let legacyData = UserDefaults.standard.data(forKey: Self.userDefaultsKey),
+              let decoded = try? JSONDecoder().decode([ScopedCredential].self, from: legacyData)
         else { return [] }
+
+        try? KeychainStore.save(key: Self.keychainMetadataKey, data: legacyData)
+        UserDefaults.standard.removeObject(forKey: Self.userDefaultsKey)
         return decoded
     }
 
     private func saveCredentials() {
         guard let data = try? JSONEncoder().encode(credentials) else { return }
-        UserDefaults.standard.set(data, forKey: Self.userDefaultsKey)
+        try? KeychainStore.save(key: Self.keychainMetadataKey, data: data)
+        UserDefaults.standard.removeObject(forKey: Self.userDefaultsKey)
     }
 }

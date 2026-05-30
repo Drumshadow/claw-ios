@@ -21,32 +21,39 @@ struct MoreTabView: View {
                     MemoryBrowserView()
                         .environment(memoryStore)
                 } label: {
-                    Label("Memory", systemImage: "brain")
+                    destinationRow(
+                        title: "Memory",
+                        subtitle: "Saved facts and conversation context",
+                        systemImage: "brain"
+                    )
                 }
 
                 NavigationLink {
                     MemoryTimelineView()
                         .environment(timelineStore)
                 } label: {
-                    HStack {
-                        Label("Knowledge Graph", systemImage: "circle.hexagongrid")
-                        Spacer()
-                        if timelineStore.bookmarkedEvents.count > 0 {
-                            Text("\(timelineStore.bookmarkedEvents.count)")
-                                .font(.caption2)
-                                .foregroundStyle(Color.clawMuted)
-                        }
-                    }
+                    destinationRow(
+                        title: "Knowledge Graph",
+                        subtitle: "Bookmarked events and linked context",
+                        systemImage: "circle.hexagongrid",
+                        badge: timelineStore.bookmarkedEvents.isEmpty ? nil : "\(timelineStore.bookmarkedEvents.count)"
+                    )
                 }
 
                 NavigationLink {
                     SkillsView()
                         .environment(skillsStore)
                 } label: {
-                    Label("Skills", systemImage: "bolt")
+                    destinationRow(
+                        title: "Skills",
+                        subtitle: "Slash commands and custom agent tools",
+                        systemImage: "bolt"
+                    )
                 }
             } header: {
                 Text("Intelligence")
+            } footer: {
+                Text("Context and capabilities the agent can use while responding.")
             }
             .listRowBackground(Color.clawCard)
 
@@ -55,19 +62,13 @@ struct MoreTabView: View {
                     BackgroundAgentListView()
                         .environment(bgAgentStore)
                 } label: {
-                    HStack {
-                        Label("Background Agents", systemImage: "eyes")
-                        Spacer()
-                        if bgAgentStore.activeIncidents.count > 0 {
-                            Text("\(bgAgentStore.activeIncidents.count)")
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(Color.clawWarn)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.clawWarn.opacity(0.12))
-                                .clipShape(Capsule())
-                        }
-                    }
+                    destinationRow(
+                        title: "Background Agents",
+                        subtitle: "Detached work, incidents, and long-running tasks",
+                        systemImage: "eyes",
+                        badge: bgAgentStore.activeIncidents.isEmpty ? nil : "\(bgAgentStore.activeIncidents.count)",
+                        badgeColor: bgAgentStore.activeIncidents.isEmpty ? .clawMuted : .clawWarn
+                    )
                 }
 
                 NavigationLink {
@@ -76,17 +77,27 @@ struct MoreTabView: View {
                         .environment(agentMonitorStore)
                         .environment(bgAgentStore)
                 } label: {
-                    Label("Agent Network", systemImage: "circle.hexagongrid.circle")
+                    destinationRow(
+                        title: "Agent Network",
+                        subtitle: "Monitor child sessions and coordination",
+                        systemImage: "circle.hexagongrid.circle"
+                    )
                 }
 
                 NavigationLink {
                     CronView()
                         .environment(cronStore)
                 } label: {
-                    Label("Scheduled Tasks", systemImage: "clock")
+                    destinationRow(
+                        title: "Scheduled Tasks",
+                        subtitle: "Recurring checks, reminders, and jobs",
+                        systemImage: "clock"
+                    )
                 }
             } header: {
                 Text("Automation")
+            } footer: {
+                Text("Things OpenClaw can keep doing after you leave the chat.")
             }
             .listRowBackground(Color.clawCard)
 
@@ -96,28 +107,24 @@ struct MoreTabView: View {
                         .environment(homeStore)
                         .environment(sessionStore)
                 } label: {
-                    HStack {
-                        Label("Home AI", systemImage: "house.fill")
-                        Spacer()
-                        if homeStore.unreadTaskCount > 0 {
-                            Text("\(homeStore.unreadTaskCount)")
-                                .font(.caption2)
-                                .foregroundStyle(Color.clawMuted)
-                        }
-                    }
+                    destinationRow(
+                        title: "Home AI",
+                        subtitle: "Personal tasks and household orchestration",
+                        systemImage: "house.fill",
+                        badge: homeStore.unreadTaskCount == 0 ? nil : "\(homeStore.unreadTaskCount)"
+                    )
                 }
 
                 NavigationLink {
                     IntegrationRegistryView()
                         .environment(homeStore)
                 } label: {
-                    HStack {
-                        Label("Integrations", systemImage: "plug")
-                        Spacer()
-                        Text("\(homeStore.connectedCount) connected")
-                            .font(.caption2)
-                            .foregroundStyle(Color.clawMuted)
-                    }
+                    destinationRow(
+                        title: "Integrations",
+                        subtitle: "Connected services and available providers",
+                        systemImage: "plug",
+                        badge: "\(homeStore.connectedCount) connected"
+                    )
                 }
             } header: {
                 Text("Personal")
@@ -129,16 +136,26 @@ struct MoreTabView: View {
                     NodeListView()
                         .environment(nodeStore)
                 } label: {
-                    Label("Nodes", systemImage: "macbook.and.iphone")
+                    destinationRow(
+                        title: "Nodes",
+                        subtitle: "Gateway, phone, and compute connections",
+                        systemImage: "macbook.and.iphone"
+                    )
                 }
 
                 NavigationLink {
                     UsageDashboardView()
                 } label: {
-                    Label("Usage & Costs", systemImage: "chart.bar")
+                    destinationRow(
+                        title: "Usage & Costs",
+                        subtitle: "Token usage and API spend from reported sessions",
+                        systemImage: "chart.bar"
+                    )
                 }
             } header: {
                 Text("Infrastructure")
+            } footer: {
+                Text("Operational surfaces. Counts are only shown when the gateway reports live data.")
             }
             .listRowBackground(Color.clawCard)
 
@@ -146,8 +163,12 @@ struct MoreTabView: View {
                 Button {
                     showSettings = true
                 } label: {
-                    Label("Settings", systemImage: "gear")
-                        .foregroundStyle(Color.clawText)
+                    destinationRow(
+                        title: "Settings",
+                        subtitle: "Notifications, connection, and app preferences",
+                        systemImage: "gear"
+                    )
+                    .foregroundStyle(Color.clawText)
                 }
                 Button(role: .destructive) {
                     Task { await appState.disconnect() }
@@ -168,6 +189,39 @@ struct MoreTabView: View {
         .toolbarColorScheme(.dark, for: .navigationBar)
         .sheet(isPresented: $showSettings) {
             SettingsView()
+        }
+    }
+
+    private func destinationRow(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        badge: String? = nil,
+        badgeColor: Color = .clawMuted
+    ) -> some View {
+        HStack(spacing: 12) {
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .foregroundStyle(Color.clawText)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(Color.clawMuted)
+                        .lineLimit(2)
+                }
+            } icon: {
+                Image(systemName: systemImage)
+            }
+            Spacer(minLength: 8)
+            if let badge, !badge.isEmpty {
+                Text(badge)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(badgeColor)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(badgeColor.opacity(0.12))
+                    .clipShape(Capsule())
+            }
         }
     }
 }

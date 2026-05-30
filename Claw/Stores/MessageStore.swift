@@ -62,6 +62,7 @@ final class MessageStore {
     private(set) var sessionModel: String?
     nonisolated(unsafe) private var eventTask: Task<Void, Never>?
     nonisolated(unsafe) private var silentReloadTask: Task<Void, Never>?
+    nonisolated(unsafe) private var responseNotificationTask: Task<Void, Never>?
     // Tracks run IDs we've started Live Activities for. Capped to prevent
     // unbounded growth during long app sessions with many agent runs.
     private var seenRunIds: Set<String> = []
@@ -86,6 +87,7 @@ final class MessageStore {
     deinit {
         eventTask?.cancel()
         silentReloadTask?.cancel()
+        responseNotificationTask?.cancel()
     }
 
     // MARK: - Subscribe / Unsubscribe
@@ -190,6 +192,14 @@ final class MessageStore {
         sendError = nil
         defer { isSending = false }
 
+        let displayTitle = sessionTitle.isEmpty ? String(sessionKey.prefix(12)) : sessionTitle
+        LiveActivityManager.shared.startOrUpdateActivity(
+            sessionId: sessionKey,
+            sessionTitle: displayTitle,
+            model: sessionModel,
+            status: "thinking"
+        )
+
         let displayText = trimmed.isEmpty ? attachments.map { $0.name }.joined(separator: ", ") : trimmed
         let tempId = "temp-\(UUID().uuidString)"
         let attachmentNames = attachments.isEmpty ? nil : attachments.map { $0.name }
@@ -250,6 +260,7 @@ final class MessageStore {
             )
             _ = try await client.send(method: GatewayMethod.chatSend, params: params)
         } catch {
+            LiveActivityManager.shared.terminateActivity()
             // Keep the bubble visible but flagged as failed so the user can retry.
             if let idx = messages.firstIndex(where: { $0.id == tempId }) {
                 messages[idx].sendFailed = true
@@ -448,6 +459,7 @@ final class MessageStore {
 
         switch state {
         case "delta":
+            responseNotificationTask?.cancel()
             guard let msgVal = payload["message"],
                   let text = extractText(from: msgVal),
                   !text.isEmpty else { return }
@@ -486,34 +498,46 @@ final class MessageStore {
             }
 
         case "final":
+            // Some gateway paths include the completed assistant message directly
+            // on chat.final. Do not wait for a later history reload in that case —
+            // otherwise a foreground chat can sit on the reasoning/tool UI until
+            // the user leaves and reopens the thread.
+            if let msgVal = payload["message"],
+               case .object(let obj) = msgVal,
+               let content = extractText(from: obj), !content.isEmpty {
+                let role: MessageRole
+                if let roleVal = obj["role"], case .string(let roleStr) = roleVal {
+                    role = MessageRole(rawString: roleStr)
+                } else {
+                    role = .assistant
+                }
+                upsertFinishedAssistantMessage(
+                    role: role,
+                    content: content,
+                    messageId: "final-\(runId)",
+                    streamId: streamId,
+                    scheduleNotification: false
+                )
+            }
+
             // Mark streaming bubble as not-streaming; the session.message event
             // (or its absence) will trigger any further sync.
             if let idx = messages.firstIndex(where: { $0.id == streamId }) {
                 messages[idx].isStreaming = false
             }
-            LiveActivityManager.shared.setIdle()
-            if UIApplication.shared.applicationState != .active {
-                let content = UNMutableNotificationContent()
-                content.title = sessionTitle.isEmpty ? "Claw" : sessionTitle
-                content.body = "Agent has responded"
-                content.sound = .default
-                let request = UNNotificationRequest(
-                    identifier: "agent-done-\(runId)",
-                    content: content,
-                    trigger: nil
-                )
-                UNUserNotificationCenter.current().add(request)
-            }
+            LiveActivityManager.shared.terminateActivity()
             // Clear any tool bubbles from this run that never received an "end" event
             messages.indices.forEach { i in
                 if messages[i].role == .tool && messages[i].isStreaming && messages[i].id.hasPrefix("tool-\(runId)-") {
                     messages[i].isStreaming = false
                 }
             }
+            refreshTranscriptAfterFinal()
 
         case "aborted", "error":
+            responseNotificationTask?.cancel()
             messages.removeAll { $0.id == streamId }
-            LiveActivityManager.shared.setIdle()
+            LiveActivityManager.shared.terminateActivity()
             // Clear any tool bubbles from this run that never received an "end" event
             messages.indices.forEach { i in
                 if messages[i].role == .tool && messages[i].isStreaming && messages[i].id.hasPrefix("tool-\(runId)-") {
@@ -552,6 +576,7 @@ final class MessageStore {
         if let iv = data["input"], case .object(let obj) = iv { toolInput = obj }
 
         if phase == "start" {
+            responseNotificationTask?.cancel()
             // Start Live Activity if first tool in this run
             if !seenRunIds.contains(runId) {
                 markRunIdSeen(runId)
@@ -652,6 +677,36 @@ final class MessageStore {
             messageId = "committed-\(UUID().uuidString)"
         }
 
+        upsertFinishedAssistantMessage(
+            role: role,
+            content: content,
+            messageId: messageId,
+            streamId: nil,
+            scheduleNotification: true
+        )
+    }
+
+    private func upsertFinishedAssistantMessage(
+        role: MessageRole,
+        content: String,
+        messageId: String,
+        streamId: String?,
+        scheduleNotification: Bool
+    ) {
+        if let streamId,
+           let idx = messages.firstIndex(where: { $0.id == streamId }) {
+            messages[idx] = ClawMessage(
+                id: messageId,
+                sessionKey: sessionKey,
+                role: role,
+                content: content,
+                isStreaming: false,
+                createdAt: messages[idx].createdAt
+            )
+            if scheduleNotification { scheduleResponseReadyNotification(messageId: messageId) }
+            return
+        }
+
         if let idx = messages.firstIndex(where: {
             $0.id.hasPrefix("stream-") && $0.role == role && $0.content == content
         }) {
@@ -663,6 +718,7 @@ final class MessageStore {
                 isStreaming: false,
                 createdAt: messages[idx].createdAt
             )
+            if scheduleNotification { scheduleResponseReadyNotification(messageId: messageId) }
             return
         }
         if let idx = messages.lastIndex(where: {
@@ -676,6 +732,7 @@ final class MessageStore {
                 isStreaming: false,
                 createdAt: messages[idx].createdAt
             )
+            if scheduleNotification { scheduleResponseReadyNotification(messageId: messageId) }
             return
         }
         if !messages.contains(where: { $0.role == role && $0.content == content }) {
@@ -687,6 +744,42 @@ final class MessageStore {
                 isStreaming: false,
                 createdAt: Date()
             ))
+            if scheduleNotification { scheduleResponseReadyNotification(messageId: messageId) }
+        }
+    }
+
+    private func refreshTranscriptAfterFinal() {
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { self?.silentReload() }
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { self?.silentReload() }
+        }
+    }
+
+    private func scheduleResponseReadyNotification(messageId: String) {
+        responseNotificationTask?.cancel()
+        responseNotificationTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard !Task.isCancelled, let self else { return }
+            guard UIApplication.shared.applicationState != .active else { return }
+            let stillStreaming = self.messages.contains { $0.isStreaming }
+            guard !stillStreaming, !self.isSending else { return }
+
+            let content = UNMutableNotificationContent()
+            content.title = "Claw agent response ready"
+            content.body = self.sessionTitle.isEmpty
+                ? "Your agent finished responding."
+                : "Your agent finished responding in \(self.sessionTitle)."
+            content.sound = .default
+            let request = UNNotificationRequest(
+                identifier: "agent-done-\(messageId)",
+                content: content,
+                trigger: nil
+            )
+            try? await UNUserNotificationCenter.current().add(request)
         }
     }
 

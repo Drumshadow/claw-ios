@@ -114,12 +114,10 @@ struct RootView: View {
                 GatewaySetupView()
             case .connecting:
                 ConnectingView()
-            case .reconnecting:
+            case .connected, .reconnecting:
                 ConnectedView()
             case .pairing(let deviceID):
                 PairingView(deviceID: deviceID)
-            case .connected:
-                ConnectedView()
             }
         }
         .animation(.easeInOut(duration: 0.25), value: appState.connectionState)

@@ -1,4 +1,4 @@
-app_identifier("ai.claw.app")
+app_identifier("ai.clawos.app")
 apple_id("")
 itc_team_id("")
 team_id("")

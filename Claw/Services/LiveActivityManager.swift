@@ -6,16 +6,39 @@ import Foundation
 final class LiveActivityManager {
     static let shared = LiveActivityManager()
     private var currentActivity: Activity<AgentActivityAttributes>?
+    private var lastActivityUpdateAt: Date = .distantPast
+    private var lastActivityState: AgentActivityAttributes.ContentState?
+    private let minimumUpdateInterval: TimeInterval = 1.0
+
+    private var activitiesEnabled: Bool {
+        ActivityAuthorizationInfo().areActivitiesEnabled
+    }
 
     // MARK: - Start persistent (idle) activity when entering a chat
     func startPersistentActivity(sessionId: String, sessionTitle: String, model: String? = nil) {
-        guard currentActivity == nil else { return }
-        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        // Keep idle activities disabled. Dynamic Island should reflect active work,
+        // not leave a permanent "thinking" affordance after the agent is done.
+    }
+
+    // MARK: - Start or update when an agent run begins
+    func startOrUpdateActivity(sessionId: String, sessionTitle: String, model: String? = nil, status: String = "running") {
+        guard activitiesEnabled else { return }
+
+        let displayTitle = sessionTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Agent running"
+            : sessionTitle
+
+        if currentActivity != nil {
+            updateActivity(currentTool: nil, status: status)
+            if let model { updateModel(model) }
+            return
+        }
+
         let attributes = AgentActivityAttributes(sessionId: sessionId)
         let state = AgentActivityAttributes.ContentState(
-            sessionTitle: sessionTitle,
+            sessionTitle: displayTitle,
             currentTool: nil,
-            status: "idle",
+            status: status,
             startedAt: Date(),
             model: model
         )
@@ -24,36 +47,13 @@ final class LiveActivityManager {
             content: .init(state: state, staleDate: nil),
             pushType: nil
         )
-    }
-
-    // MARK: - Start or update to "running" when an agent run begins
-    func startOrUpdateActivity(sessionId: String, sessionTitle: String, model: String? = nil) {
-        if currentActivity != nil {
-            // Already have a persistent activity — just update status to running
-            updateActivity(currentTool: nil, status: "running")
-            if let model { updateModel(model) }
-        } else {
-            // Not started yet (e.g. opened via push) — start fresh as running
-            guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
-            let attributes = AgentActivityAttributes(sessionId: sessionId)
-            let state = AgentActivityAttributes.ContentState(
-                sessionTitle: sessionTitle.isEmpty ? String(sessionId.prefix(12)) : sessionTitle,
-                currentTool: nil,
-                status: "running",
-                startedAt: Date(),
-                model: model
-            )
-            currentActivity = try? Activity.request(
-                attributes: attributes,
-                content: .init(state: state, staleDate: nil),
-                pushType: nil
-            )
-        }
+        lastActivityState = state
+        lastActivityUpdateAt = Date()
     }
 
     // MARK: - Update tool / status during a run
     func updateActivity(currentTool: String?, status: String) {
-        guard let activity = currentActivity else { return }
+        guard activitiesEnabled, let activity = currentActivity else { return }
         let existingModel = activity.content.state.model
         let state = AgentActivityAttributes.ContentState(
             sessionTitle: activity.content.state.sessionTitle,
@@ -62,14 +62,12 @@ final class LiveActivityManager {
             startedAt: activity.content.state.startedAt,
             model: existingModel
         )
-        Task {
-            await activity.update(.init(state: state, staleDate: nil))
-        }
+        updateActivityIfNeeded(activity, state: state)
     }
 
     // MARK: - Push model update mid-activity
     func updateModel(_ model: String?) {
-        guard let activity = currentActivity, let model else { return }
+        guard activitiesEnabled, let activity = currentActivity, let model else { return }
         let state = AgentActivityAttributes.ContentState(
             sessionTitle: activity.content.state.sessionTitle,
             currentTool: activity.content.state.currentTool,
@@ -77,32 +75,45 @@ final class LiveActivityManager {
             startedAt: activity.content.state.startedAt,
             model: model
         )
+        updateActivityIfNeeded(activity, state: state)
+    }
+
+    private func updateActivityIfNeeded(
+        _ activity: Activity<AgentActivityAttributes>,
+        state: AgentActivityAttributes.ContentState
+    ) {
+        let now = Date()
+        let unchanged = lastActivityState?.sessionTitle == state.sessionTitle &&
+            lastActivityState?.currentTool == state.currentTool &&
+            lastActivityState?.status == state.status &&
+            lastActivityState?.model == state.model
+
+        guard !unchanged else { return }
+        guard now.timeIntervalSince(lastActivityUpdateAt) >= minimumUpdateInterval else { return }
+
+        lastActivityState = state
+        lastActivityUpdateAt = now
         Task {
             await activity.update(.init(state: state, staleDate: nil))
         }
     }
 
-    // MARK: - Set idle after a run completes (keeps activity alive on island)
+    // MARK: - Set idle after a run completes
     func setIdle() {
-        guard let activity = currentActivity else { return }
-        let state = AgentActivityAttributes.ContentState(
-            sessionTitle: activity.content.state.sessionTitle,
-            currentTool: nil,
-            status: "idle",
-            startedAt: activity.content.state.startedAt,
-            model: activity.content.state.model
-        )
-        Task {
-            await activity.update(.init(state: state, staleDate: nil))
-        }
+        terminateActivity()
     }
 
-    // MARK: - Truly end the activity (called when leaving the chat)
+    // MARK: - Truly end the activity
     func terminateActivity() {
         guard let activity = currentActivity else { return }
-        Task {
+        Task { [weak self] in
             await activity.end(.init(state: activity.content.state, staleDate: nil), dismissalPolicy: .immediate)
+            guard let self else { return }
+            if self.currentActivity?.id == activity.id {
+                self.currentActivity = nil
+                self.lastActivityState = nil
+                self.lastActivityUpdateAt = .distantPast
+            }
         }
-        currentActivity = nil
     }
 }

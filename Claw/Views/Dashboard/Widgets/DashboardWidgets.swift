@@ -546,12 +546,17 @@ struct AgentActivityWidget: View {
             accentColor: .clawAccent,
             alertCount: pendingApprovals
         ) {
-            HStack(spacing: 0) {
-                agentStat(value: "\(activeSessions)", label: "Sessions", color: .clawTeal)
-                Divider().frame(height: 40).background(Color.clawBorder)
-                agentStat(value: "\(runningAgents)", label: "Running", color: .clawOk)
-                Divider().frame(height: 40).background(Color.clawBorder)
-                agentStat(value: "\(pendingApprovals)", label: "Approvals", color: pendingApprovals > 0 ? .clawWarn : .clawMuted)
+            VStack(spacing: 8) {
+                HStack(spacing: 0) {
+                    agentStat(value: "\(activeSessions)", label: "Sessions", color: .clawTeal)
+                    Divider().frame(height: 40).background(Color.clawBorder)
+                    agentStat(value: "\(runningAgents)", label: "Running", color: runningAgents > 0 ? .clawOk : .clawMuted)
+                    Divider().frame(height: 40).background(Color.clawBorder)
+                    agentStat(value: "\(pendingApprovals)", label: "Approvals", color: pendingApprovals > 0 ? .clawWarn : .clawMuted)
+                }
+                Text("Live counts from the connected gateway")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.clawMuted)
             }
             .padding(.vertical, 12)
         }
@@ -582,10 +587,15 @@ struct TokenCostWidget: View {
             icon: "dollarsign.circle.fill",
             accentColor: .clawAccent
         ) {
-            HStack(spacing: 0) {
-                costStat(value: formatCost(totalCostTodayUsd), label: "Today", color: .clawAccent)
-                Divider().frame(height: 40).background(Color.clawBorder)
-                costStat(value: formatTokens(totalTokensToday), label: "Tokens", color: .clawTeal)
+            VStack(spacing: 8) {
+                HStack(spacing: 0) {
+                    costStat(value: formatCost(totalCostTodayUsd), label: "Reported", color: .clawAccent)
+                    Divider().frame(height: 40).background(Color.clawBorder)
+                    costStat(value: formatTokens(totalTokensToday), label: "Tokens", color: .clawTeal)
+                }
+                Text("Totals use sessions that include usage metadata")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.clawMuted)
             }
             .padding(.vertical, 12)
         }
@@ -692,12 +702,13 @@ struct CronStatusWidget: View {
                     .font(.system(size: 22))
                     .foregroundStyle(recentFailures > 0 ? Color.clawWarn : Color.clawOk)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(recentFailures > 0 ? "\(recentFailures) recent failures" : "All jobs healthy")
+                    Text(recentFailures > 0 ? "\(recentFailures) recent failures" : "No failures reported")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(recentFailures > 0 ? Color.clawWarn : Color.clawOk)
-                    Text("Scheduled jobs")
+                        .foregroundStyle(recentFailures > 0 ? Color.clawWarn : Color.clawMuted)
+                    Text("Cron health is shown when the gateway reports it")
                         .font(.system(size: 11))
                         .foregroundStyle(Color.clawMuted)
+                        .lineLimit(2)
                 }
             }
             .padding(12)

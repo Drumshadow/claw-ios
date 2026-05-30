@@ -27,7 +27,10 @@ import CryptoKit
         var components = URLComponents(string: "https://github.com/login/oauth/authorize")!
         components.queryItems = [
             URLQueryItem(name: "client_id", value: Self.clientId),
-            URLQueryItem(name: "scope", value: "repo,workflow"),
+            // OAuth Apps need the broad `repo` scope for private Actions workflow-run reads.
+            // Keep the mobile token limited to public repositories; private repo support should
+            // move to a GitHub App/server-side broker with fine-grained Actions read permission.
+            URLQueryItem(name: "scope", value: "public_repo"),
             URLQueryItem(name: "redirect_uri", value: Self.callbackURL),
             URLQueryItem(name: "state", value: state),
             URLQueryItem(name: "code_challenge", value: codeChallenge),

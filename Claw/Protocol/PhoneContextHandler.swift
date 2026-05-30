@@ -1,6 +1,7 @@
 import Foundation
 import EventKit
 import Contacts
+import UIKit
 
 // MARK: - Response params
 
@@ -17,6 +18,15 @@ final class PhoneContextHandler {
 
     private let client: GatewayClient
     private var task: Task<Void, Never>?
+    private var requestTimestampsByMethod: [String: [Date]] = [:]
+
+    private let sensitiveMethods: Set<String> = [
+        "phone.calendar.list",
+        "phone.contacts.search",
+        "phone.reminders.list"
+    ]
+    private let rateLimitWindow: TimeInterval = 5 * 60
+    private let maxSensitiveRequestsPerWindow = 8
 
     init(client: GatewayClient) {
         self.client = client
@@ -44,6 +54,15 @@ final class PhoneContextHandler {
               let method = event.payload["method"]?.stringValue else { return }
 
         let params = event.payload["params"]?.objectValue ?? [:]
+
+        guard allowSensitivePhoneRequest(method: method) else {
+            await reply(
+                requestId: requestId,
+                data: nil,
+                error: "Phone context is only available while Claw is open and rate-limited."
+            )
+            return
+        }
 
         switch method {
         case "phone.calendar.list":
@@ -87,7 +106,7 @@ final class PhoneContextHandler {
         let events = store.events(matching: predicate)
 
         let formatter = ISO8601DateFormatter()
-        let items: [[String: String]] = events.map { ev in
+        let items: [[String: String]] = events.prefix(50).map { ev in
             var d: [String: String] = [
                 "title": ev.title ?? "",
                 "start": formatter.string(from: ev.startDate),
@@ -203,6 +222,25 @@ final class PhoneContextHandler {
     }
 
     // MARK: - Helpers
+
+    private func allowSensitivePhoneRequest(method: String) -> Bool {
+        guard sensitiveMethods.contains(method) else { return true }
+        guard UIApplication.shared.applicationState == .active else { return false }
+
+        let now = Date()
+        let cutoff = now.addingTimeInterval(-rateLimitWindow)
+        var timestamps = requestTimestampsByMethod[method, default: []]
+            .filter { $0 >= cutoff }
+
+        guard timestamps.count < maxSensitiveRequestsPerWindow else {
+            requestTimestampsByMethod[method] = timestamps
+            return false
+        }
+
+        timestamps.append(now)
+        requestTimestampsByMethod[method] = timestamps
+        return true
+    }
 
     private func reply(requestId: String, data: [String: JSONValue]?, error: String?) async {
         let p = PhoneResponseParams(requestId: requestId, data: data, error: error)

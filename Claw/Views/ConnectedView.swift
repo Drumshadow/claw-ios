@@ -17,6 +17,7 @@ struct ConnectedView: View {
     @State private var terminalSessionStore: TerminalSessionStore?
     @State private var runbookStore: RunbookStore?
     @State private var modelRouterStore: ModelRouterStore?
+    @State private var storeClientID: ObjectIdentifier?
 
     // Stream 7–14 stores
     @State private var agentMonitorStore: AgentMonitorStore?
@@ -34,8 +35,15 @@ struct ConnectedView: View {
                let bgAgent = bgAgentStore,
                let timeline = timelineStore,
                let home = homeStore,
-               let modelRouter = modelRouterStore {
+               let modelRouter = modelRouterStore,
+               let approvalStore = toolApprovalStore,
+               let memStore = memoryStore,
+               let cStore = cronStore,
+               let terminalStore = terminalSessionStore,
+               let runbookStore = runbookStore {
                 content(sessions: sessions, nodes: nodes, skills: skills, client: client,
+                        approvalStore: approvalStore, memStore: memStore, cStore: cStore,
+                        terminalStore: terminalStore, runbookStore: runbookStore,
                         agentMon: agentMon, bgAgent: bgAgent, timeline: timeline, home: home, modelRouter: modelRouter)
             } else {
                 ZStack {
@@ -50,6 +58,9 @@ struct ConnectedView: View {
         .onAppear { setupStoresIfNeeded() }
         .onChange(of: appState.activeClient != nil) { _, hasClient in
             if hasClient { setupStoresIfNeeded() }
+        }
+        .onChange(of: appState.connectionState) { _, state in
+            if case .connected = state { setupStoresIfNeeded() }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             refreshDynamicStores()
@@ -69,48 +80,42 @@ struct ConnectedView: View {
         nodes: NodeStore,
         skills: SkillsStore,
         client: GatewayClient,
+        approvalStore: ToolApprovalStore,
+        memStore: MemoryStore,
+        cStore: CronStore,
+        terminalStore: TerminalSessionStore,
+        runbookStore: RunbookStore,
         agentMon: AgentMonitorStore,
         bgAgent: BackgroundAgentStore,
         timeline: MemoryTimelineStore,
         home: HomeOrchestrationStore,
         modelRouter: ModelRouterStore
     ) -> some View {
-        if let approvalStore = toolApprovalStore,
-           let memStore = memoryStore,
-           let cStore = cronStore {
-            AdaptiveSessionsLayout(client: client)
-                .environment(sessions)
-                .environment(nodes)
-                .environment(skills)
-                .environment(approvalStore)
-                .environment(memStore)
-                .environment(cStore)
-                .environment(terminalSessionStore)
-                .environment(runbookStore)
-                .environment(modelRouter)
-                .environment(agentMon)
-                .environment(bgAgent)
-                .environment(timeline)
-                .environment(home)
-        } else {
-            AdaptiveSessionsLayout(client: client)
-                .environment(sessions)
-                .environment(nodes)
-                .environment(skills)
-                .environment(terminalSessionStore)
-                .environment(runbookStore)
-                .environment(modelRouter)
-                .environment(agentMon)
-                .environment(bgAgent)
-                .environment(timeline)
-                .environment(home)
-        }
+        AdaptiveSessionsLayout(client: client)
+            .environment(sessions)
+            .environment(nodes)
+            .environment(skills)
+            .environment(approvalStore)
+            .environment(memStore)
+            .environment(cStore)
+            .environment(terminalStore)
+            .environment(runbookStore)
+            .environment(modelRouter)
+            .environment(agentMon)
+            .environment(bgAgent)
+            .environment(timeline)
+            .environment(home)
     }
 
     // MARK: - Setup
 
     private func setupStoresIfNeeded() {
         guard let client = appState.activeClient else { return }
+        let clientID = ObjectIdentifier(client)
+        if storeClientID != clientID {
+            resetStores(for: client, clientID: clientID)
+            return
+        }
         if sessionStore == nil {
             let store = SessionStore(client: client)
             sessionStore = store
@@ -176,6 +181,60 @@ struct ConnectedView: View {
         }
     }
 
+    private func resetStores(for client: GatewayClient, clientID: ObjectIdentifier) {
+        storeClientID = clientID
+
+        let sessions = SessionStore(client: client)
+        sessionStore = sessions
+        Task { try? await sessions.load() }
+
+        let nodes = NodeStore(client: client)
+        nodeStore = nodes
+        Task { try? await nodes.load() }
+
+        let skills = SkillsStore(client: client)
+        skillsStore = skills
+        Task { try? await skills.load() }
+
+        toolApprovalStore = ToolApprovalStore(client: client)
+
+        let memory = MemoryStore(client: client)
+        memoryStore = memory
+        Task { try? await memory.reload() }
+
+        let cron = CronStore(client: client)
+        cronStore = cron
+        Task { try? await cron.load() }
+
+        let terminalSessions = TerminalSessionStore(client: client)
+        terminalSessionStore = terminalSessions
+        Task { try? await terminalSessions.load() }
+
+        let runbooks = RunbookStore(client: client)
+        runbookStore = runbooks
+        Task { try? await runbooks.load() }
+
+        let modelRouter = ModelRouterStore(client: client)
+        modelRouterStore = modelRouter
+        Task { await modelRouter.fetchAvailableModels() }
+
+        let agentMonitor = AgentMonitorStore(client: client)
+        agentMonitorStore = agentMonitor
+        Task { await agentMonitor.refresh() }
+
+        let bgAgents = BackgroundAgentStore(client: client)
+        bgAgentStore = bgAgents
+        Task { await bgAgents.loadAll() }
+
+        let timeline = MemoryTimelineStore(client: client)
+        timelineStore = timeline
+        Task { try? await timeline.reload() }
+
+        let home = HomeOrchestrationStore(client: client)
+        homeStore = home
+        Task { await home.loadAll() }
+    }
+
     private func refreshDynamicStores() {
         Task {
             if let sessionStore { try? await sessionStore.load() }
@@ -214,6 +273,7 @@ struct AdaptiveSessionsLayout: View {
     @Environment(MemoryTimelineStore.self) private var timelineStore
     @Environment(HomeOrchestrationStore.self) private var homeStore
     @State private var selectedSession: ClawSession?
+    @SceneStorage("claw.selectedSessionID") private var selectedSessionID: String?
     @State private var showSettings = false
     @State private var showNodes = false
     @State private var sidebarSelection: SidebarItem? = .sessions
@@ -251,6 +311,10 @@ struct AdaptiveSessionsLayout: View {
                 ToolApprovalSheet(request: req, store: toolApprovalStore)
             }
         }
+        .onAppear { restoreSelectedSessionIfNeeded() }
+        .onChange(of: sessionStore.sessions.map(\.id)) { _, _ in
+            restoreSelectedSessionIfNeeded()
+        }
     }
 
     // MARK: - iPad: NavigationSplitView (sidebar with Sessions + Nodes)
@@ -285,7 +349,7 @@ struct AdaptiveSessionsLayout: View {
                 switch sidebarSelection ?? .sessions {
                 case .sessions:
                     SessionListView(onSelect: { session in
-                        selectedSession = session
+                        selectSession(session)
                     })
                     .environment(sessionStore)
                 case .nodes:
@@ -300,10 +364,12 @@ struct AdaptiveSessionsLayout: View {
                         session: session,
                         client: client,
                         onOpenChildSession: { child in
-                            selectedSession = child
+                            selectSession(child)
                         }
                     )
                     .environment(sessionStore)
+                    .environment(skillsStore)
+                    .environment(agentMonitorStore)
                     .id(session.id)
                 }
             } else {
@@ -319,7 +385,7 @@ struct AdaptiveSessionsLayout: View {
             // MARK: Chat tab
             NavigationStack {
                 SessionListView(onSelect: { session in
-                    selectedSession = session
+                    selectSession(session)
                 })
                 .environment(sessionStore)
                 .navigationDestination(item: $selectedSession) { session in
@@ -327,11 +393,12 @@ struct AdaptiveSessionsLayout: View {
                         session: session,
                         client: client,
                         onOpenChildSession: { child in
-                            selectedSession = child
+                            selectSession(child)
                         }
                     )
                     .environment(sessionStore)
                     .environment(skillsStore)
+                    .environment(agentMonitorStore)
                     .id(session.id)
                 }
                 .toolbar {
@@ -382,6 +449,20 @@ struct AdaptiveSessionsLayout: View {
             .tag(ClawTab.more)
         }
         .tint(Color.clawAccent)
+    }
+
+    // MARK: - Selection persistence
+
+    private func selectSession(_ session: ClawSession) {
+        selectedSession = session
+        selectedSessionID = session.id
+        sidebarSelection = .sessions
+    }
+
+    private func restoreSelectedSessionIfNeeded() {
+        guard let id = selectedSessionID else { return }
+        guard let restored = sessionStore.sessions.first(where: { $0.id == id }) else { return }
+        selectedSession = restored
     }
 
     // MARK: - No-selection placeholder (iPad only)

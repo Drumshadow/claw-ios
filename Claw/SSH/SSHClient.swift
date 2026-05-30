@@ -5,6 +5,46 @@ import NIOCore
 import NIOSSH
 import Security
 
+// MARK: - Host key validation
+
+private final class TOFUHostKeyValidator: NIOSSHClientServerAuthenticationDelegate, @unchecked Sendable {
+    private let keychainKey: String
+
+    init(host: String, port: Int) {
+        let normalizedHost = host.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        self.keychainKey = "ssh_host_key_fingerprint_\(normalizedHost)_\(port)"
+    }
+
+    func validateHostKey(hostKey: NIOSSHPublicKey, validationCompletePromise: EventLoopPromise<Void>) {
+        let fingerprint = Self.fingerprint(for: hostKey)
+        if let storedData = try? KeychainStore.load(key: keychainKey),
+           let stored = String(data: storedData, encoding: .utf8) {
+            if stored == fingerprint {
+                validationCompletePromise.succeed(())
+            } else {
+                validationCompletePromise.fail(SSHClient.SSHError.hostKeyMismatch)
+            }
+            return
+        }
+
+        do {
+            try KeychainStore.save(key: keychainKey, data: Data(fingerprint.utf8))
+            validationCompletePromise.succeed(())
+        } catch {
+            validationCompletePromise.fail(error)
+        }
+    }
+
+    private static func fingerprint(for hostKey: NIOSSHPublicKey) -> String {
+        // NIOSSH exposes parsing and equality publicly but not a stable public encoder
+        // for the wire-format key bytes. Hash the reflected key representation as a
+        // compile-safe TOFU pin; replace with raw wire bytes if/when Citadel/NIOSSH
+        // exposes a public encoder in the app's pinned dependency version.
+        let digest = SHA256.hash(data: Data(String(reflecting: hostKey).utf8))
+        return Data(digest).base64EncodedString()
+    }
+}
+
 // MARK: - SSHClient
 
 /// A lightweight namespace for fire-and-forget SSH command execution via Citadel.
@@ -16,6 +56,7 @@ enum SSHClient {
         case keyParseFailure(String)
         case connectionFailed(String)
         case commandFailed(String)
+        case hostKeyMismatch
 
         var errorDescription: String? {
             switch self {
@@ -27,6 +68,8 @@ enum SSHClient {
                 return "SSH connection failed: \(msg)"
             case .commandFailed(let msg):
                 return "SSH command failed: \(msg)"
+            case .hostKeyMismatch:
+                return "SSH host key changed. Refusing to connect because this may indicate a man-in-the-middle attack."
             }
         }
     }
@@ -54,7 +97,7 @@ enum SSHClient {
             host: host,
             port: port,
             authenticationMethod: { authMethod },
-            hostKeyValidator: .acceptAnything()
+            hostKeyValidator: .custom(TOFUHostKeyValidator(host: host, port: port))
         )
 
         let client: Citadel.SSHClient

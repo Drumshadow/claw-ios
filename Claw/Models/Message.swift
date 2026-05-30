@@ -42,7 +42,8 @@ struct ClawMessage: Identifiable, Hashable, Codable {
         lhs.content == rhs.content &&
         lhs.isStreaming == rhs.isStreaming &&
         lhs.sendFailed == rhs.sendFailed &&
-        lhs.toolResult == rhs.toolResult
+        lhs.toolResult == rhs.toolResult &&
+        lhs.thinkingContent == rhs.thinkingContent
     }
 }
 

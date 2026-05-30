@@ -17,6 +17,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var showAddGateway = false
+    @State private var editingGateway: GatewayConfig?
     @State private var showResetPairingAlert = false
     @State private var deviceID: String = ""
     @State private var copiedDeviceID = false
@@ -61,6 +62,15 @@ struct SettingsView: View {
                 ManualGatewayEntryView { config in
                     showAddGateway = false
                     gatewayStore.add(config)
+                }
+            }
+            .sheet(item: $editingGateway) { gateway in
+                ManualGatewayEntryView(initialConfig: gateway, actionTitle: "Save") { updated in
+                    editingGateway = nil
+                    gatewayStore.upsert(updated, setDefault: gateway.isDefault)
+                    if appState.selectedConfig?.id == gateway.id {
+                        appState.selectedConfig = updated
+                    }
                 }
             }
             .alert("Reset Pairing", isPresented: $showResetPairingAlert) {
@@ -127,9 +137,7 @@ struct SettingsView: View {
                     .font(.subheadline)
             } else {
                 ForEach(gatewayStore.gateways) { gateway in
-                    Button {
-                        gatewayStore.setDefault(gateway)
-                    } label: {
+                    HStack {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(gateway.name)
@@ -146,8 +154,18 @@ struct SettingsView: View {
                                     .foregroundStyle(Color.clawAccent)
                             }
                         }
+                        .contentShape(Rectangle())
+                        .onTapGesture { gatewayStore.setDefault(gateway) }
+
+                        Button {
+                            editingGateway = gateway
+                        } label: {
+                            Image(systemName: "pencil")
+                                .foregroundStyle(Color.clawMuted)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Edit gateway")
                     }
-                    .buttonStyle(.plain)
                 }
                 .onDelete { indexSet in
                     for idx in indexSet {

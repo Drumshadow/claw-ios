@@ -22,16 +22,38 @@ final class GatewayStore {
 
     /// Appends a new gateway and persists the list.
     func add(_ config: GatewayConfig) {
-        // Avoid exact duplicates (same host + port)
-        guard !gateways.contains(where: { $0.host == config.host && $0.port == config.port }) else {
-            return
-        }
+        upsert(config, setDefault: gateways.isEmpty)
+    }
+
+    /// Inserts or updates a gateway and persists immediately.
+    ///
+    /// Matching prefers stable id, then falls back to host + port + TLS so manual
+    /// retries don't create duplicates. This intentionally saves even if the
+    /// connection attempt later fails, so users can name/edit gateways before
+    /// pairing or fixing network details.
+    func upsert(_ config: GatewayConfig, setDefault: Bool = false) {
         var updated = config
-        // If this is the first entry, make it the default automatically
-        if gateways.isEmpty {
+        if gateways.isEmpty || setDefault {
             updated.isDefault = true
         }
-        gateways.append(updated)
+
+        if let idx = gateways.firstIndex(where: { $0.id == updated.id }) {
+            gateways[idx] = updated
+        } else if let idx = gateways.firstIndex(where: {
+            $0.host == updated.host && $0.port == updated.port && $0.isSecure == updated.isSecure
+        }) {
+            updated.id = gateways[idx].id
+            if !setDefault { updated.isDefault = gateways[idx].isDefault }
+            gateways[idx] = updated
+        } else {
+            gateways.append(updated)
+        }
+
+        if updated.isDefault {
+            for i in gateways.indices where gateways[i].id != updated.id {
+                gateways[i].isDefault = false
+            }
+        }
         GatewayConfig.saveAll(gateways)
     }
 

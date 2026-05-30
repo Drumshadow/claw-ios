@@ -23,7 +23,7 @@ struct ChatThreadView: View {
     var onOpenChildSession: ((ClawSession) -> Void)? = nil
 
     @State private var store: MessageStore
-    @State private var composeText: String = ""
+    @State private var composeText: String
     @State private var pendingScrollRestore: String? = nil
     @State private var isNearBottom: Bool = true
     @State private var forceScrollAfterSend: Bool = false
@@ -39,6 +39,7 @@ struct ChatThreadView: View {
     @State private var sendButtonPressed = false
     @State private var avatarPulse: CGFloat = 1.0
     @State private var voiceManager = VoiceInputManager()
+    @State private var pendingScrollTask: Task<Void, Never>? = nil
     @State private var slashSuggestions: [ClawSkill] = []
     // Voice Ops Mode (operational push-to-talk, separate from compose dictation)
     @State private var voiceOpsManager = VoiceOpsManager()
@@ -47,6 +48,7 @@ struct ChatThreadView: View {
     @FocusState private var isComposeFocused: Bool
     @Environment(SessionStore.self) private var sessionStore
     @Environment(SkillsStore.self) private var skillsStore
+    @Environment(AgentMonitorStore.self) private var agentMonitorStore
 
     init(
         session: ClawSession,
@@ -57,6 +59,7 @@ struct ChatThreadView: View {
         self.client = client
         self.onOpenChildSession = onOpenChildSession
         _store = State(initialValue: MessageStore(client: client, sessionKey: session.id, sessionTitle: session.title, sessionModel: session.model))
+        _composeText = State(initialValue: UserDefaults.standard.string(forKey: Self.draftKey(for: session.id)) ?? "")
     }
 
     // MARK: - Computed
@@ -72,19 +75,34 @@ struct ChatThreadView: View {
         sessionForHeader.agentStatus
     }
 
-    private var isAgentActive: Bool {
-        switch agentStatus {
-        case .running, .thinking: return true
-        case .idle: return false
-        }
-    }
-
     private var hasActiveStream: Bool {
         store.messages.contains { $0.id.hasPrefix("stream-") && $0.isStreaming }
     }
 
+    private var hasActiveTool: Bool {
+        store.messages.contains { $0.role == .tool && $0.isStreaming }
+    }
+
     private var currentToolName: String? {
         store.messages.last(where: { $0.role == .tool && $0.isStreaming })?.toolName
+    }
+
+    private var hasLocalAgentActivity: Bool {
+        store.isSending || hasActiveStream || hasActiveTool
+    }
+
+    private var isAgentActive: Bool {
+        if hasLocalAgentActivity { return true }
+
+        // Treat gateway session status as a startup hint only. The session list can
+        // briefly report a stale running/thinking state after chat.final; once this
+        // thread has loaded and there is no local stream/tool/send activity, prefer
+        // the concrete message stream so the header/pill do not get stuck green.
+        guard store.isLoading || store.messages.isEmpty else { return false }
+        switch agentStatus {
+        case .running, .thinking: return true
+        case .idle: return false
+        }
     }
 
     private var isSendDisabled: Bool {
@@ -102,6 +120,30 @@ struct ChatThreadView: View {
 
     private var childSessionKeys: [String] {
         sessionForHeader.childSessionKeys
+    }
+
+    private var activeChildSessionKeys: [String] {
+        let childKeys = childSessionKeys
+        guard !childKeys.isEmpty else { return [] }
+
+        let monitorByKey = Dictionary(uniqueKeysWithValues:
+            agentMonitorStore.sessions.lazy
+                .filter { childKeys.contains($0.id) }
+                .map { ($0.id, $0) }
+        )
+        let sessionsByKey = Dictionary(uniqueKeysWithValues:
+            sessionStore.sessions.lazy
+                .filter { childKeys.contains($0.id) }
+                .map { ($0.id, $0) }
+        )
+
+        return childKeys.filter { key in
+            if let monitor = monitorByKey[key] {
+                return monitor.status.isActive
+            }
+            guard let session = sessionsByKey[key] else { return false }
+            return session.agentStatus != .idle
+        }
     }
 
     private var filteredSlashSuggestions: [ClawSkill] {
@@ -124,15 +166,20 @@ struct ChatThreadView: View {
                 if hasMetadata {
                     metadataRow
                 }
+                if store.loadError != nil && !store.messages.isEmpty {
+                    loadErrorBanner
+                }
                 messageList
                     .background(Color.clawBg)
-                if !childSessionKeys.isEmpty {
+                    .overlay(alignment: .bottom) {
+                        if isAgentActive {
+                            activePill
+                                .transition(.opacity)
+                                .animation(.easeInOut(duration: 0.15), value: isAgentActive)
+                        }
+                    }
+                if !activeChildSessionKeys.isEmpty {
                     subagentsSection
-                }
-                if isAgentActive {
-                    activePill
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                        .animation(.easeInOut(duration: 0.15), value: isAgentActive)
                 }
                 if !filteredSlashSuggestions.isEmpty {
                     slashSuggestionsPanel
@@ -295,12 +342,6 @@ struct ChatThreadView: View {
                 store.updateSessionModel(m)
             }
 
-            // Start persistent Live Activity so model name shows on island immediately
-            LiveActivityManager.shared.startPersistentActivity(
-                sessionId: session.id,
-                sessionTitle: session.title,
-                model: resolvedModel
-            )
             do {
                 try await store.load()
             } catch {
@@ -346,11 +387,15 @@ struct ChatThreadView: View {
             ModelPickerSheet(client: client, currentModel: sessionForHeader.model)
         }
         .onDisappear {
+            pendingScrollTask?.cancel()
             Task { await store.unsubscribe() }
             LiveActivityManager.shared.terminateActivity()
         }
         .onChange(of: sessionForHeader.model) { _, newModel in
             store.updateSessionModel(newModel)
+        }
+        .onChange(of: composeText) { _, newValue in
+            saveDraft(newValue)
         }
         .onChange(of: isAgentActive) { _, active in
             if active {
@@ -417,8 +462,9 @@ struct ChatThreadView: View {
                         } else {
                             // Top sentinel — triggers `loadMore` when it appears.
                             topSentinel
-                            ForEach(Array(store.messages.enumerated()), id: \.element.id) { index, message in
-                                let prevRole = index > 0 ? store.messages[index - 1].role : nil
+                            let messageSnapshot = Array(store.messages.enumerated())
+                            ForEach(messageSnapshot, id: \.element.id) { index, message in
+                                let prevRole = index > 0 ? messageSnapshot[index - 1].element.role : nil
                                 let sameSender = prevRole == message.role
                                 MessageBubbleView(
                                     message: message,
@@ -437,9 +483,13 @@ struct ChatThreadView: View {
                                     .id("typing-indicator")
                                     .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .bottom)))
                             }
-                            // Bottom padding + scroll anchor combined
+                            // Bottom padding + scroll anchor combined.
+                            // The active pill is overlaid on the bottom of the scroll view
+                            // so it does not resize the chat during status changes. Reserve
+                            // matching content inset here so the typing dots / last bubble sit
+                            // above that overlay instead of dipping into the subagent row below.
                             Color.clear
-                                .frame(height: 8)
+                                .frame(height: isAgentActive ? 52 : 8)
                                 .id("bottom-anchor")
                                 .background(
                                     GeometryReader { bottomProxy in
@@ -460,30 +510,36 @@ struct ChatThreadView: View {
                     // yank them back down on every stream delta.
                     isNearBottom = bottomOffset <= viewport.size.height + 160
                 }
-                .defaultScrollAnchor(.bottom)
                 .onChange(of: store.messages.count) { oldCount, newCount in
-                    // Don't auto-scroll-to-bottom when older messages were prepended;
-                    // the scrollAnchorAfterPrepend handler below restores position.
+                    // Don't auto-scroll when older messages are prepended during pagination.
                     let isPrepending = store.scrollAnchorAfterPrepend != nil ||
                                        store.isLoadingMore ||
                                        pendingScrollRestore != nil
-                    if !isPrepending, newCount > oldCount, isNearBottom || forceScrollAfterSend {
-                        scrollToBottom(proxy: proxy, animated: true)
-                        forceScrollAfterSend = false
+                    guard !isPrepending, newCount > oldCount, isNearBottom || forceScrollAfterSend else { return }
+                    forceScrollAfterSend = false
+                    // Debounce: cancel any in-flight scroll and wait 50ms for layout to settle
+                    // before scrolling. This prevents fighting with activePill slide-in animation
+                    // and coalesces rapid message additions into a single non-animated scroll.
+                    pendingScrollTask?.cancel()
+                    pendingScrollTask = Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 50_000_000)
+                        guard !Task.isCancelled else { return }
+                        proxy.scrollTo("bottom-anchor", anchor: .bottom)
                     }
                 }
                 .onChange(of: store.messages.last?.content) { _, _ in
-                    if store.scrollAnchorAfterPrepend == nil, pendingScrollRestore == nil, !isComposeFocused, isNearBottom {
-                        scrollToBottom(proxy: proxy, animated: false)
-                    }
-                }
-                .onChange(of: store.messages.last?.id) { _, _ in
-                    if store.scrollAnchorAfterPrepend == nil, pendingScrollRestore == nil, !store.isLoadingMore, isNearBottom || forceScrollAfterSend {
-                        Task { @MainActor in
-                            try? await Task.sleep(nanoseconds: 100_000_000)
-                            scrollToBottom(proxy: proxy, animated: false)
-                            forceScrollAfterSend = false
-                        }
+                    // Follow streaming content while near bottom. 120ms debounce coalesces
+                    // rapid per-token updates into at most ~8 scrolls/sec instead of one per
+                    // streaming chunk, eliminating the preference-key feedback loop.
+                    guard store.scrollAnchorAfterPrepend == nil,
+                          pendingScrollRestore == nil,
+                          isNearBottom || forceScrollAfterSend else { return }
+                    pendingScrollTask?.cancel()
+                    pendingScrollTask = Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 120_000_000)
+                        guard !Task.isCancelled else { return }
+                        proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                        forceScrollAfterSend = false
                     }
                 }
                 .onChange(of: store.isLoading) { _, isLoading in
@@ -549,6 +605,27 @@ struct ChatThreadView: View {
         .id("top-sentinel")
     }
 
+    private var loadErrorBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Color.clawWarn)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Messages may be out of date")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.clawText)
+                Text(store.loadError?.localizedDescription ?? "Could not refresh this thread.")
+                    .font(.caption2)
+                    .foregroundStyle(Color.clawMuted)
+                    .lineLimit(2)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color.clawWarn.opacity(0.10))
+        .overlay(Divider().background(Color.clawWarn.opacity(0.25)), alignment: .bottom)
+    }
+
     private var emptyMessagesView: some View {
         VStack(spacing: 16) {
             Image(systemName: "bubble.left.and.bubble.right")
@@ -571,9 +648,14 @@ struct ChatThreadView: View {
     private var subagentsSection: some View {
         // Snapshot keys + per-key session once per render so we don't recompute
         // `childSessionKeys` or scan `sessionStore.sessions` for every row.
-        let keys = childSessionKeys
+        let keys = activeChildSessionKeys
         let sessionsByKey = Dictionary(uniqueKeysWithValues:
             sessionStore.sessions.lazy
+                .filter { keys.contains($0.id) }
+                .map { ($0.id, $0) }
+        )
+        let monitorsByKey = Dictionary(uniqueKeysWithValues:
+            agentMonitorStore.sessions.lazy
                 .filter { keys.contains($0.id) }
                 .map { ($0.id, $0) }
         )
@@ -585,7 +667,8 @@ struct ChatThreadView: View {
                     ForEach(keys, id: \.self) { key in
                         SubagentRowView(
                             key: key,
-                            session: sessionsByKey[key]
+                            session: sessionsByKey[key],
+                            monitorSession: monitorsByKey[key]
                         ) {
                             openChild(key: key)
                         }
@@ -600,7 +683,7 @@ struct ChatThreadView: View {
                     Image(systemName: "person.2")
                         .font(.system(size: 12))
                         .foregroundStyle(Color.clawMuted)
-                    Text("Subagents (\(keys.count))")
+                    Text("Active subagents (\(keys.count))")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Color.clawText)
                 }
@@ -655,6 +738,7 @@ struct ChatThreadView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
         .frame(height: 36)
         .background(Color.clawBgAccent)
         .overlay(
@@ -902,6 +986,7 @@ struct ChatThreadView: View {
         let attachments = pendingAttachments
         guard !text.isEmpty || !attachments.isEmpty else { return }
         composeText = ""
+        clearDraft()
         pendingAttachments = []
         selectedPhotoItems = []
         forceScrollAfterSend = true
@@ -971,6 +1056,7 @@ struct ChatThreadView: View {
     private func sendExplainPrompt() {
         let prompt = "In 2-3 sentences, summarize what you just did, what succeeded, and what failed if anything. Be concise."
         composeText = ""
+        clearDraft()
         forceScrollAfterSend = true
         Task {
             try? await store.send(text: prompt)
@@ -989,6 +1075,23 @@ struct ChatThreadView: View {
                 showStoppedToast = false
             }
         }
+    }
+
+    private func saveDraft(_ value: String) {
+        let key = Self.draftKey(for: session.id)
+        if value.isEmpty {
+            UserDefaults.standard.removeObject(forKey: key)
+        } else {
+            UserDefaults.standard.set(value, forKey: key)
+        }
+    }
+
+    private func clearDraft() {
+        UserDefaults.standard.removeObject(forKey: Self.draftKey(for: session.id))
+    }
+
+    private static func draftKey(for sessionId: String) -> String {
+        "claw.chatDraft.\(sessionId)"
     }
 
     private func scrollToBottom(proxy: ScrollViewProxy, animated: Bool) {
@@ -1043,19 +1146,29 @@ struct ChatThreadView: View {
 private struct SubagentRowView: View {
     let key: String
     let session: ClawSession?
+    let monitorSession: AgentMonitorSession?
     let onTap: () -> Void
 
     private var displayName: String {
+        if let title = monitorSession?.title, !title.isEmpty { return title }
         if let title = session?.title, !title.isEmpty { return title }
         return String(key.prefix(12))
     }
 
-    private var status: AgentStatus {
-        session?.agentStatus ?? .idle
+    private var statusText: String {
+        if let monitorSession { return monitorSession.status.label }
+        return session?.agentStatus.displayText ?? "Running"
     }
 
     private var dotColor: Color {
-        switch status {
+        if let monitorSession {
+            switch monitorSession.status {
+            case .running:   return Color.clawOk
+            case .completed: return Color.clawMuted.opacity(0.5)
+            case .error:     return Color.clawDanger
+            }
+        }
+        switch session?.agentStatus ?? .idle {
         case .idle:     return Color.clawMuted.opacity(0.5)
         case .thinking: return Color.clawWarn
         case .running:  return Color.clawOk
@@ -1068,10 +1181,16 @@ private struct SubagentRowView: View {
                 Circle()
                     .fill(dotColor)
                     .frame(width: 8, height: 8)
-                Text(displayName)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Color.clawText)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(displayName)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.clawText)
+                        .lineLimit(1)
+                    Text(statusText)
+                        .font(.caption2)
+                        .foregroundStyle(Color.clawMuted)
+                        .lineLimit(1)
+                }
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(.system(size: 10, weight: .semibold))
@@ -1088,63 +1207,46 @@ private struct SubagentRowView: View {
 // MARK: - TypingIndicatorView
 
 private struct TypingIndicatorView: View {
-    @State private var phase: Double = 0
-
     var body: some View {
         HStack(alignment: .bottom, spacing: 0) {
-            HStack(spacing: 5) {
-                ForEach(0..<3) { i in
-                    Circle()
-                        .fill(Color.clawMuted)
-                        .frame(width: 7, height: 7)
-                        .opacity(0.3 + 0.7 * max(0, sin(phase - Double(i) * 0.6)))
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.clawCard)
-                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(Color.clawBorder, lineWidth: 1))
-            )
+            AnimatedDotsView(dotSize: 7, spacing: 5)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color.clawCard)
+                        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(Color.clawBorder, lineWidth: 1))
+                )
             Spacer(minLength: 48)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 2)
-        .onAppear {
-            withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
-                phase = .pi * 2
-            }
-        }
     }
 }
 
 // MARK: - AnimatedDotsView
 
 private struct AnimatedDotsView: View {
-    @State private var opacities: [Double] = [0.3, 0.3, 0.3]
+    var dotSize: CGFloat = 3
+    var spacing: CGFloat = 3
 
     var body: some View {
-        HStack(spacing: 3) {
-            ForEach(0..<3, id: \.self) { i in
-                Circle()
-                    .fill(Color.clawMuted)
-                    .frame(width: 3, height: 3)
-                    .opacity(opacities[i])
-            }
-        }
-        .onAppear {
-            for i in 0..<3 {
-                withAnimation(
-                    .easeInOut(duration: 0.4)
-                    .delay(Double(i) * 0.15)
-                    .repeatForever(autoreverses: true)
-                ) {
-                    opacities[i] = 1.0
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+            let phase = timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.2) / 1.2
+            HStack(spacing: spacing) {
+                ForEach(0..<3, id: \.self) { i in
+                    let dotPhase = (phase + Double(i) * 0.18).truncatingRemainder(dividingBy: 1.0)
+                    let wave = (sin(dotPhase * 2 * .pi - .pi / 2) + 1) / 2
+                    Circle()
+                        .fill(Color.clawMuted)
+                        .frame(width: dotSize, height: dotSize)
+                        .opacity(0.28 + 0.72 * wave)
+                        .scaleEffect(0.85 + 0.25 * wave)
                 }
             }
         }
+        .frame(width: dotSize * 3 + spacing * 2, height: dotSize * 1.3)
     }
 }
 

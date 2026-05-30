@@ -139,6 +139,10 @@ struct MissionControlView: View {
     private var overviewTab: some View {
         ScrollView {
             LazyVStack(spacing: 12) {
+                if !isEditMode {
+                    dashboardTruthSummary
+                }
+
                 // Live status banner if unhealthy
                 if topologyStore.graph.overallHealth != .ok && !isEditMode {
                     alertBanner
@@ -339,6 +343,61 @@ struct MissionControlView: View {
         // Compact widgets are paired inside an HStack rendered as a single GridItem.
         // For simplicity we render each widget individually and use a 2-col LazyVGrid externally.
         widgets.map { GridItem(widget: $0) }
+    }
+
+    // MARK: - Status summary
+
+    private var dashboardTruthSummary: some View {
+        HStack(spacing: 12) {
+            Image(systemName: topologyStore.graph.overallHealth == .ok ? "checkmark.seal.fill" : topologyStore.graph.overallHealth.systemImage)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(topologyStore.graph.overallHealth == .ok ? Color.clawOk : topologyStore.graph.overallHealth.color)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(summaryTitle)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.clawTextStrong)
+                Text(summarySubtitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.clawMuted)
+                    .lineLimit(2)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.clawCard)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.clawBorder, lineWidth: 1)
+                )
+        )
+    }
+
+    private var summaryTitle: String {
+        if dashboardStore.pendingApprovals > 0 {
+            return "\(dashboardStore.pendingApprovals) approval\(dashboardStore.pendingApprovals == 1 ? "" : "s") waiting"
+        }
+        if dashboardStore.runningAgents > 0 {
+            return "\(dashboardStore.runningAgents) agent\(dashboardStore.runningAgents == 1 ? "" : "s") running"
+        }
+        if topologyStore.graph.overallHealth != .ok {
+            return "Infrastructure needs attention"
+        }
+        return "Gateway is quiet"
+    }
+
+    private var summarySubtitle: String {
+        var pieces: [String] = []
+        pieces.append("\(dashboardStore.activeSessions) session\(dashboardStore.activeSessions == 1 ? "" : "s")")
+        pieces.append("\(topologyStore.graph.activeIncidents.count) incident\(topologyStore.graph.activeIncidents.count == 1 ? "" : "s")")
+        if let ts = topologyStore.lastRefreshedAt {
+            pieces.append("refreshed \(relativeTime(ts))")
+        } else {
+            pieces.append("waiting for live topology data")
+        }
+        return pieces.joined(separator: " · ")
     }
 
     // MARK: - Alert banner

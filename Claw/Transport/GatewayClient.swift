@@ -109,17 +109,22 @@ actor GatewayClient {
         self.isRunning = true
         task.resume()
 
-        // Wait for connect.challenge
-        let challenge = try await waitForChallenge()
+        do {
+            // Wait for connect.challenge
+            let challenge = try await waitForChallenge()
 
-        // Build and send connect request
-        let result = try await sendConnectRequest(challenge: challenge)
+            // Build and send connect request
+            let result = try await sendConnectRequest(challenge: challenge)
 
-        // Start the receive loop and keepalive
-        startReceiveLoop()
-        startPingLoop()
+            // Start the receive loop and keepalive
+            startReceiveLoop()
+            startPingLoop()
 
-        return result
+            return result
+        } catch {
+            await disconnect(notify: false)
+            throw error
+        }
     }
 
     // MARK: - Disconnect
@@ -160,9 +165,16 @@ actor GatewayClient {
         }
 
         // Register the continuation BEFORE sending to avoid a race where the response
-        // arrives before the continuation is stored.
+        // arrives before the continuation is stored. If sending itself fails, reject the
+        // continuation immediately so the request cannot hang until the timeout.
         async let responseTask: [String: JSONValue] = router.register(id: id)
-        try await task.send(.string(jsonString))
+        do {
+            try await task.send(.string(jsonString))
+        } catch {
+            await router.reject(id: id, error: error)
+            _ = try? await responseTask
+            throw error
+        }
         return try await responseTask
     }
 

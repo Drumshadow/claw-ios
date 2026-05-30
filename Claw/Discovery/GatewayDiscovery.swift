@@ -118,10 +118,9 @@ extension GatewayDiscovery: NetServiceBrowserDelegate {
         didRemove service: NetService,
         moreComing: Bool
     ) {
-        // Match by name + domain as a proxy ID
         let proxyID = stableID(for: service)
         DispatchQueue.main.async { [weak self] in
-            self?.discovered.removeAll { UUID(uuidString: $0.id.uuidString) != nil && $0.name == service.name }
+            self?.discovered.removeAll { $0.id == proxyID }
         }
         resolvingServices.removeAll { $0 === service }
     }

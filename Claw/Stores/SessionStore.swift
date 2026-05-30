@@ -363,8 +363,11 @@ final class SessionStore {
         }
 
         let agentStatus: AgentStatus
-        if let v = obj["hasActiveRun"], case .bool(let active) = v, active {
-            agentStatus = .running
+        if let v = obj["hasActiveRun"], case .bool(let active) = v {
+            // `status` may be a persisted/last-run value. `hasActiveRun` is the
+            // live truth from the gateway, so when it is explicitly false the UI
+            // must not keep showing a stale green/thinking state.
+            agentStatus = active ? .running : .idle
         } else if let v = obj["status"], case .string(let s) = v {
             agentStatus = AgentStatus(rawString: s)
         } else {
@@ -446,14 +449,29 @@ final class SessionStore {
             saveSessionCache(sessions)
 
         case "chat":
-            guard let skVal = event.payload["sessionKey"],
-                  case .string(let sk) = skVal,
-                  let stateVal = event.payload["state"],
+            let sk: String?
+            if let skVal = event.payload["sessionKey"], case .string(let value) = skVal {
+                sk = value
+            } else if let skVal = event.payload["key"], case .string(let value) = skVal {
+                sk = value
+            } else {
+                sk = nil
+            }
+            guard let stateVal = event.payload["state"],
                   case .string(let state) = stateVal else { return }
-            if state == "final" || state == "aborted" || state == "error" {
-                if let idx = sessions.firstIndex(where: { $0.id == sk }) {
-                    sessions[idx].agentStatus = .idle
+            if state == "delta" {
+                if let sk, let idx = sessions.firstIndex(where: { $0.id == sk }) {
+                    sessions[idx].agentStatus = .running
                 }
+            } else if state == "final" || state == "aborted" || state == "error" {
+                if let sk, let idx = sessions.firstIndex(where: { $0.id == sk }) {
+                    sessions[idx].agentStatus = .idle
+                    saveSessionCache(sessions)
+                }
+                // Follow up with the authoritative sessions.list state after the
+                // gateway has committed the completed run. This clears stale dots
+                // even if a final event arrived before the session index updated.
+                silentReloadSessions()
             }
 
         case "agents.changed", "models.changed", "config.changed", GatewayEventName.modelHealthUpdate, GatewayEventName.modelRoutingChanged:
