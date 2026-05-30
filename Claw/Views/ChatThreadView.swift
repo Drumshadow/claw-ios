@@ -2,6 +2,7 @@ import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
 import PDFKit
+import UIKit
 
 // MARK: - EmptyParams
 
@@ -878,6 +879,17 @@ struct ChatThreadView: View {
                     handleFileImport(result: result)
                 }
 
+                Button {
+                    pasteClipboardText()
+                } label: {
+                    Image(systemName: "doc.on.clipboard")
+                        .font(.system(size: 19, weight: .medium))
+                        .foregroundStyle(Color.clawMuted)
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Paste from clipboard")
+
                 TextField("Message", text: $composeText, axis: .vertical)
                     .font(.system(size: 15))
                     .foregroundStyle(Color.clawText)
@@ -993,6 +1005,25 @@ struct ChatThreadView: View {
         Task {
             try? await store.send(text: text, attachments: attachments)
         }
+    }
+
+    private func pasteClipboardText() {
+        let pasteboard = UIPasteboard.general
+        let pasted = pasteboard.strings?.filter { !$0.isEmpty }.joined(separator: "\n")
+            ?? pasteboard.url?.absoluteString
+            ?? pasteboard.string
+        guard let pasted, !pasted.isEmpty else {
+            isComposeFocused = true
+            return
+        }
+
+        let needsSeparator = !composeText.isEmpty &&
+            !composeText.hasSuffix(" ") &&
+            !composeText.hasSuffix("\n") &&
+            !pasted.hasPrefix(" ") &&
+            !pasted.hasPrefix("\n")
+        composeText += (needsSeparator ? " " : "") + pasted
+        isComposeFocused = true
     }
 
     // MARK: - Attachment loading
