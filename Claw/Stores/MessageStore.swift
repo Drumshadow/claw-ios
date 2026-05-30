@@ -445,12 +445,20 @@ final class MessageStore {
         }
     }
 
+    private func payloadBelongsToSession(_ payload: [String: JSONValue]) -> Bool {
+        if let skVal = payload["sessionKey"], case .string(let sk) = skVal {
+            return sk == sessionKey
+        }
+        if let keyVal = payload["key"], case .string(let key) = keyVal {
+            return key == sessionKey
+        }
+        return false
+    }
+
     // MARK: - Private: chat event (streaming)
 
     private func handleChatEvent(_ payload: [String: JSONValue]) {
-        guard let skVal = payload["sessionKey"],
-              case .string(let sk) = skVal,
-              sk == sessionKey else { return }
+        guard payloadBelongsToSession(payload) else { return }
         guard let stateVal = payload["state"],
               case .string(let state) = stateVal else { return }
 
@@ -559,9 +567,7 @@ final class MessageStore {
 
     private func handleSessionToolEvent(_ payload: [String: JSONValue]) {
         // Only handle events for our session
-        guard let skVal = payload["sessionKey"],
-              case .string(let sk) = skVal,
-              sk == sessionKey else { return }
+        guard payloadBelongsToSession(payload) else { return }
 
         guard let runIdVal = payload["runId"],
               case .string(let runId) = runIdVal else { return }
@@ -628,9 +634,7 @@ final class MessageStore {
     // MARK: - Private: session.message event (committed messages)
 
     private func handleSessionMessageEvent(_ payload: [String: JSONValue]) {
-        guard let skVal = payload["sessionKey"],
-              case .string(let sk) = skVal,
-              sk == sessionKey else { return }
+        guard payloadBelongsToSession(payload) else { return }
 
         // The payload carries a fully-projected message — parse it directly
         // instead of refetching the entire history.
