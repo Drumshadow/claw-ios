@@ -539,27 +539,37 @@ final class MessageStore {
                 messages[idx].isStreaming = false
             }
             LiveActivityManager.shared.terminateActivity()
-            // Clear any tool bubbles from this run that never received an "end" event
-            messages.indices.forEach { i in
-                if messages[i].role == .tool && messages[i].isStreaming && messages[i].id.hasPrefix("tool-\(runId)-") {
-                    messages[i].isStreaming = false
-                }
-            }
+            clearStreamingStateForFinishedRun(runId: runId)
             refreshTranscriptAfterFinal()
 
         case "aborted", "error":
             responseNotificationTask?.cancel()
             messages.removeAll { $0.id == streamId }
             LiveActivityManager.shared.terminateActivity()
-            // Clear any tool bubbles from this run that never received an "end" event
-            messages.indices.forEach { i in
-                if messages[i].role == .tool && messages[i].isStreaming && messages[i].id.hasPrefix("tool-\(runId)-") {
-                    messages[i].isStreaming = false
-                }
-            }
+            clearStreamingStateForFinishedRun(runId: runId)
 
         default:
             break
+        }
+    }
+
+    private func clearStreamingStateForFinishedRun(runId: String) {
+        messages.indices.forEach { i in
+            if messages[i].id == "stream-\(runId)" {
+                messages[i].isStreaming = false
+            }
+
+            // Final chat events are terminal for this subscribed session. Tool
+            // end events can be missed or keyed differently from the final, so
+            // do not leave any tool bubble in an active/pending state once the
+            // run is finished; otherwise ChatThreadView keeps the bottom active
+            // pill/tool row alive after the assistant answer is already visible.
+            if messages[i].role == .tool && messages[i].isStreaming {
+                messages[i].isStreaming = false
+                if messages[i].toolResult == nil {
+                    messages[i].toolResult = "Done"
+                }
+            }
         }
     }
 
