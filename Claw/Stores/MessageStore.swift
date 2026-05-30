@@ -30,6 +30,13 @@ final class MessageStore {
 
     private static let messageCacheLimit = 50
 
+    /// Locally-projected bubbles that should be replaced by durable transcript
+    /// messages once the gateway commit arrives. `final-` covers chat.final
+    /// payloads that render before chat.history/session.message catch up.
+    private static func isEphemeralMessageId(_ id: String) -> Bool {
+        id.hasPrefix("temp-") || id.hasPrefix("stream-") || id.hasPrefix("final-")
+    }
+
     private var messageCacheKey: String { "claw.messages.\(sessionKey)" }
 
     private func loadMessageCache() -> [ClawMessage] {
@@ -40,7 +47,7 @@ final class MessageStore {
 
     private func saveMessageCache(_ messages: [ClawMessage]) {
         let toCache = messages
-            .filter { !$0.isStreaming && !$0.sendFailed && $0.role != .tool && !$0.id.hasPrefix("temp-") && !$0.id.hasPrefix("stream-") }
+            .filter { !$0.isStreaming && !$0.sendFailed && $0.role != .tool && !Self.isEphemeralMessageId($0.id) }
             .suffix(Self.messageCacheLimit)
         if let data = try? JSONEncoder().encode(Array(toCache)) {
             UserDefaults.standard.set(data, forKey: messageCacheKey)
@@ -319,7 +326,7 @@ final class MessageStore {
             return
         }
 
-        // Index existing temp-/stream- bubbles by role+content for O(1) lookup
+        // Index existing temp-/stream-/final- bubbles by role+content for O(1) lookup
         // instead of an O(N*M) scan-per-incoming-item. With large histories and
         // long message content this turns a quadratic blowup into a linear pass.
         struct MatchKey: Hashable {
@@ -328,7 +335,7 @@ final class MessageStore {
         }
         var existingStableIds: [MatchKey: String] = [:]
         var failedBubbles: [ClawMessage] = []
-        var streamBubbles: [ClawMessage] = []
+        var ephemeralBubbles: [ClawMessage] = []
         var toolMessages: [ClawMessage] = []
         for msg in messages {
             if msg.sendFailed {
@@ -339,17 +346,13 @@ final class MessageStore {
                 toolMessages.append(msg)
                 continue
             }
-            let isTemp = msg.id.hasPrefix("temp-")
-            let isStream = msg.id.hasPrefix("stream-")
-            if isTemp || isStream {
+            if Self.isEphemeralMessageId(msg.id) {
                 let key = MatchKey(roleRaw: msg.role.rawValue, content: msg.content)
                 // Earlier-inserted ID wins; later duplicates leave the first in place.
                 if existingStableIds[key] == nil {
                     existingStableIds[key] = msg.id
                 }
-                if isStream {
-                    streamBubbles.append(msg)
-                }
+                ephemeralBubbles.append(msg)
             }
         }
 
@@ -363,9 +366,9 @@ final class MessageStore {
 
             let role = MessageRole(rawString: roleStr)
             let key = MatchKey(roleRaw: role.rawValue, content: content)
-            // Reuse an existing bubble ID (temp- or stream-) if it matches by role+content.
-            // Covers both optimistic user messages and just-finalized streaming bubbles,
-            // preventing SwiftUI from animating the message out and back in.
+            // Reuse an existing local bubble ID if it matches by role+content.
+            // Covers optimistic user messages, active streams, and chat.final
+            // projections, preventing SwiftUI from animating the message out and back in.
             let stableId = existingStableIds[key] ?? "\(sessionKey)-h\(index)"
             resultKeys.insert(key)
 
@@ -379,10 +382,12 @@ final class MessageStore {
             ))
         }
 
-        // Keep stream bubbles (active or just-finalized) not yet confirmed in history.
-        // Guards against the timing gap between chat.final and gateway commit where a
-        // silentReload could otherwise wipe the assistant message before it lands.
-        let unresolved = streamBubbles.filter {
+        // Keep local bubbles (active streams and chat.final projections) not yet
+        // confirmed in history. This guards the timing gap where chat.final has
+        // already rendered the assistant answer but chat.history is still built
+        // from the previous durable transcript; dropping final- bubbles here is
+        // what made the answer disappear until leaving/reopening the thread.
+        let unresolved = ephemeralBubbles.filter {
             !resultKeys.contains(MatchKey(roleRaw: $0.role.rawValue, content: $0.content))
         }
 
@@ -708,7 +713,7 @@ final class MessageStore {
         }
 
         if let idx = messages.firstIndex(where: {
-            $0.id.hasPrefix("stream-") && $0.role == role && $0.content == content
+            ($0.id.hasPrefix("stream-") || $0.id.hasPrefix("final-")) && $0.role == role && $0.content == content
         }) {
             messages[idx] = ClawMessage(
                 id: messageId,
@@ -722,7 +727,7 @@ final class MessageStore {
             return
         }
         if let idx = messages.lastIndex(where: {
-            $0.id.hasPrefix("stream-") && $0.role == role && !$0.isStreaming
+            ($0.id.hasPrefix("stream-") || $0.id.hasPrefix("final-")) && $0.role == role && !$0.isStreaming
         }) {
             messages[idx] = ClawMessage(
                 id: messageId,
