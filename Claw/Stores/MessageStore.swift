@@ -362,6 +362,7 @@ final class MessageStore {
         for (index, item) in arr.enumerated() {
             guard case .object(let obj) = item else { continue }
             guard let roleVal = obj["role"], case .string(let roleStr) = roleVal else { continue }
+            guard isTranscriptDisplayRole(roleStr) else { continue }
             guard let content = extractText(from: obj), !content.isEmpty else { continue }
 
             let role = MessageRole(rawString: roleStr)
@@ -391,9 +392,11 @@ final class MessageStore {
             !resultKeys.contains(MatchKey(roleRaw: $0.role.rawValue, content: $0.content))
         }
 
-        // Tool messages are client-projected from chat events; chat.history does not
-        // emit them as text, so preserve any we have to avoid losing tool-call UI.
-        messages = result + unresolved + toolMessages + failedBubbles
+        // Tool messages are client-projected live UI, not durable chat transcript.
+        // Preserve only currently-streaming tools during an in-flight run; completed
+        // tool rows should not stick to the bottom after the assistant finalizes.
+        let activeToolMessages = toolMessages.filter { $0.isStreaming }
+        messages = result + unresolved + activeToolMessages + failedBubbles
         saveMessageCache(messages)
 
         // The gateway returns up to `limit` most-recent messages. If it returned
@@ -558,19 +561,13 @@ final class MessageStore {
             if messages[i].id == "stream-\(runId)" {
                 messages[i].isStreaming = false
             }
-
-            // Final chat events are terminal for this subscribed session. Tool
-            // end events can be missed or keyed differently from the final, so
-            // do not leave any tool bubble in an active/pending state once the
-            // run is finished; otherwise ChatThreadView keeps the bottom active
-            // pill/tool row alive after the assistant answer is already visible.
-            if messages[i].role == .tool && messages[i].isStreaming {
-                messages[i].isStreaming = false
-                if messages[i].toolResult == nil {
-                    messages[i].toolResult = "Done"
-                }
-            }
         }
+
+        // Tool rows are transient live UI, not durable transcript messages. Final
+        // chat events are terminal for this subscribed session; remove any live
+        // tool bubble so it cannot remain stuck at the bottom after the assistant
+        // answer is already visible.
+        messages.removeAll { $0.role == .tool }
     }
 
     // MARK: - Private: session.tool event (live tool visibility)
@@ -650,13 +647,18 @@ final class MessageStore {
         // instead of refetching the entire history.
         guard let msgVal = payload["message"],
               case .object(let obj) = msgVal,
-              let roleVal = obj["role"], case .string(let roleStr) = roleVal,
-              let content = extractText(from: obj), !content.isEmpty
+              let roleVal = obj["role"], case .string(let roleStr) = roleVal
         else {
             // Required fields missing — fall back to a full reload.
             silentReload()
             return
         }
+
+        // Gateway transcript streams include non-chat records such as toolResult.
+        // Those are not user-visible assistant replies; rendering them as normal
+        // assistant bubbles is what leaves a stale-looking message at the bottom.
+        guard isTranscriptDisplayRole(roleStr) else { return }
+        guard let content = extractText(from: obj), !content.isEmpty else { return }
 
         let role = MessageRole(rawString: roleStr)
 
@@ -803,6 +805,15 @@ final class MessageStore {
     }
 
     // MARK: - Private: text extraction
+
+    private func isTranscriptDisplayRole(_ role: String) -> Bool {
+        switch role.lowercased() {
+        case "user", "assistant", "system":
+            return true
+        default:
+            return false
+        }
+    }
 
     private func extractText(from value: JSONValue) -> String? {
         if case .object(let obj) = value { return extractText(from: obj) }
