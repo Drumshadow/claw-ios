@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - MessageBubbleView
 
@@ -6,6 +7,8 @@ struct MessageBubbleView: View {
     let message: ClawMessage
     var onRetry: (() -> Void)? = nil
     var onDiscard: (() -> Void)? = nil
+
+    @State private var showTextSelectionSheet = false
 
     private var isUser: Bool { message.role == .user }
     private var isFailed: Bool { message.sendFailed }
@@ -77,10 +80,18 @@ struct MessageBubbleView: View {
         .overlay(bubbleBorder)
         .contextMenu {
             Button {
+                showTextSelectionSheet = true
+            } label: {
+                Label("Select Text", systemImage: "text.cursor")
+            }
+            Button {
                 UIPasteboard.general.string = message.content
             } label: {
-                Label("Copy", systemImage: "doc.on.doc")
+                Label("Copy All", systemImage: "doc.on.doc")
             }
+        }
+        .sheet(isPresented: $showTextSelectionSheet) {
+            SelectableMessageTextSheet(text: message.content)
         }
     }
 
@@ -190,6 +201,58 @@ struct MessageBubbleView: View {
         f.timeStyle = .short
         return f
     }()
+}
+
+// MARK: - SelectableMessageTextSheet
+
+private struct SelectableMessageTextSheet: View {
+    let text: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            SelectableTextView(text: text)
+                .background(Color.clawBg)
+                .navigationTitle("Message Text")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button("Done") { dismiss() }
+                            .tint(Color.clawAccent)
+                    }
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button {
+                            UIPasteboard.general.string = text
+                        } label: {
+                            Label("Copy All", systemImage: "doc.on.doc")
+                        }
+                        .tint(Color.clawAccent)
+                    }
+                }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationBackground(Color.clawBg)
+    }
+}
+
+private struct SelectableTextView: UIViewRepresentable {
+    let text: String
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.alwaysBounceVertical = true
+        textView.backgroundColor = .clear
+        textView.textContainerInset = UIEdgeInsets(top: 16, left: 14, bottom: 16, right: 14)
+        textView.font = .preferredFont(forTextStyle: .body)
+        textView.textColor = UIColor(Color.clawText)
+        return textView
+    }
+
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        uiView.text = text
+    }
 }
 
 // MARK: - ToolCallRowView

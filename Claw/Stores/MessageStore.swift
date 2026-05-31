@@ -29,6 +29,7 @@ final class MessageStore {
     // MARK: - Cache helpers
 
     private static let messageCacheLimit = 50
+    private static let maxDisplayContentCharacters = 80_000
 
     /// Locally-projected bubbles that should be replaced by durable transcript
     /// messages once the gateway commit arrives. `final-` covers chat.final
@@ -364,7 +365,7 @@ final class MessageStore {
             guard let roleVal = obj["role"], case .string(let roleStr) = roleVal else { continue }
             guard isTranscriptDisplayRole(roleStr) else { continue }
             guard let rawContent = extractText(from: obj) else { continue }
-            let content = stripLeadingCommandments(from: rawContent)
+            let content = prepareDisplayContent(from: rawContent)
             guard !content.isEmpty else { continue }
 
             let role = MessageRole(rawString: roleStr)
@@ -479,8 +480,9 @@ final class MessageStore {
         case "delta":
             responseNotificationTask?.cancel()
             guard let msgVal = payload["message"],
-                  let text = extractText(from: msgVal),
-                  !text.isEmpty else { return }
+                  let rawText = extractText(from: msgVal) else { return }
+            let text = prepareDisplayContent(from: rawText)
+            guard !text.isEmpty else { return }
 
             // Keep sessionModel up-to-date if the gateway includes it in the delta payload
             if let modelVal = payload["model"], case .string(let m) = modelVal, !m.isEmpty {
@@ -522,20 +524,23 @@ final class MessageStore {
             // the user leaves and reopens the thread.
             if let msgVal = payload["message"],
                case .object(let obj) = msgVal,
-               let content = extractText(from: obj), !content.isEmpty {
-                let role: MessageRole
-                if let roleVal = obj["role"], case .string(let roleStr) = roleVal {
-                    role = MessageRole(rawString: roleStr)
-                } else {
-                    role = .assistant
+               let rawContent = extractText(from: obj) {
+                let content = prepareDisplayContent(from: rawContent)
+                if !content.isEmpty {
+                    let role: MessageRole
+                    if let roleVal = obj["role"], case .string(let roleStr) = roleVal {
+                        role = MessageRole(rawString: roleStr)
+                    } else {
+                        role = .assistant
+                    }
+                    upsertFinishedAssistantMessage(
+                        role: role,
+                        content: content,
+                        messageId: "final-\(runId)",
+                        streamId: streamId,
+                        scheduleNotification: false
+                    )
                 }
-                upsertFinishedAssistantMessage(
-                    role: role,
-                    content: content,
-                    messageId: "final-\(runId)",
-                    streamId: streamId,
-                    scheduleNotification: false
-                )
             }
 
             // Mark streaming bubble as not-streaming; the session.message event
@@ -661,7 +666,7 @@ final class MessageStore {
         // assistant bubbles is what leaves a stale-looking message at the bottom.
         guard isTranscriptDisplayRole(roleStr) else { return }
         guard let rawContent = extractText(from: obj) else { return }
-        let content = stripLeadingCommandments(from: rawContent)
+        let content = prepareDisplayContent(from: rawContent)
         guard !content.isEmpty else { return }
 
         let role = MessageRole(rawString: roleStr)
@@ -817,6 +822,14 @@ final class MessageStore {
         default:
             return false
         }
+    }
+
+    private func prepareDisplayContent(from text: String) -> String {
+        let stripped = stripLeadingCommandments(from: text)
+        let sanitized = stripped.replacingOccurrences(of: "\0", with: "")
+        guard sanitized.count > Self.maxDisplayContentCharacters else { return sanitized }
+        return String(sanitized.prefix(Self.maxDisplayContentCharacters))
+            + "\n\n…[message truncated in iOS UI for stability]"
     }
 
     private func stripLeadingCommandments(from text: String) -> String {
