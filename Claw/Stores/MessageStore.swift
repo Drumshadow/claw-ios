@@ -29,6 +29,15 @@ final class MessageStore {
     // MARK: - Cache helpers
 
     private static let messageCacheLimit = 50
+    private static let maxDisplayContentCharacters = 80_000
+    private static let maxAuxiliaryContentCharacters = 12_000
+
+    /// Locally-projected bubbles that should be replaced by durable transcript
+    /// messages once the gateway commit arrives. `final-` covers chat.final
+    /// payloads that render before chat.history/session.message catch up.
+    private static func isEphemeralMessageId(_ id: String) -> Bool {
+        id.hasPrefix("temp-") || id.hasPrefix("stream-") || id.hasPrefix("final-")
+    }
 
     private var messageCacheKey: String { "claw.messages.\(sessionKey)" }
 
@@ -40,8 +49,13 @@ final class MessageStore {
 
     private func saveMessageCache(_ messages: [ClawMessage]) {
         let toCache = messages
-            .filter { !$0.isStreaming && !$0.sendFailed && $0.role != .tool && !$0.id.hasPrefix("temp-") && !$0.id.hasPrefix("stream-") }
+            .filter { !$0.isStreaming && !$0.sendFailed && $0.role != .tool && !Self.isEphemeralMessageId($0.id) }
             .suffix(Self.messageCacheLimit)
+            .map { msg -> ClawMessage in
+                var cached = msg
+                cached.fullContent = nil
+                return cached
+            }
         if let data = try? JSONEncoder().encode(Array(toCache)) {
             UserDefaults.standard.set(data, forKey: messageCacheKey)
         }
@@ -63,6 +77,13 @@ final class MessageStore {
     nonisolated(unsafe) private var eventTask: Task<Void, Never>?
     nonisolated(unsafe) private var silentReloadTask: Task<Void, Never>?
     nonisolated(unsafe) private var responseNotificationTask: Task<Void, Never>?
+    nonisolated(unsafe) private var streamFlushTask: Task<Void, Never>?
+    private struct PendingStreamUpdate {
+        let content: String
+        let fullContent: String?
+        let thinkingContent: String?
+    }
+    private var pendingStreamUpdates: [String: PendingStreamUpdate] = [:]
     // Tracks run IDs we've started Live Activities for. Capped to prevent
     // unbounded growth during long app sessions with many agent runs.
     private var seenRunIds: Set<String> = []
@@ -88,6 +109,7 @@ final class MessageStore {
         eventTask?.cancel()
         silentReloadTask?.cancel()
         responseNotificationTask?.cancel()
+        streamFlushTask?.cancel()
     }
 
     // MARK: - Subscribe / Unsubscribe
@@ -319,7 +341,7 @@ final class MessageStore {
             return
         }
 
-        // Index existing temp-/stream- bubbles by role+content for O(1) lookup
+        // Index existing temp-/stream-/final- bubbles by role+content for O(1) lookup
         // instead of an O(N*M) scan-per-incoming-item. With large histories and
         // long message content this turns a quadratic blowup into a linear pass.
         struct MatchKey: Hashable {
@@ -328,7 +350,7 @@ final class MessageStore {
         }
         var existingStableIds: [MatchKey: String] = [:]
         var failedBubbles: [ClawMessage] = []
-        var streamBubbles: [ClawMessage] = []
+        var ephemeralBubbles: [ClawMessage] = []
         var toolMessages: [ClawMessage] = []
         for msg in messages {
             if msg.sendFailed {
@@ -339,17 +361,13 @@ final class MessageStore {
                 toolMessages.append(msg)
                 continue
             }
-            let isTemp = msg.id.hasPrefix("temp-")
-            let isStream = msg.id.hasPrefix("stream-")
-            if isTemp || isStream {
+            if Self.isEphemeralMessageId(msg.id) {
                 let key = MatchKey(roleRaw: msg.role.rawValue, content: msg.content)
                 // Earlier-inserted ID wins; later duplicates leave the first in place.
                 if existingStableIds[key] == nil {
                     existingStableIds[key] = msg.id
                 }
-                if isStream {
-                    streamBubbles.append(msg)
-                }
+                ephemeralBubbles.append(msg)
             }
         }
 
@@ -359,13 +377,17 @@ final class MessageStore {
         for (index, item) in arr.enumerated() {
             guard case .object(let obj) = item else { continue }
             guard let roleVal = obj["role"], case .string(let roleStr) = roleVal else { continue }
-            guard let content = extractText(from: obj), !content.isEmpty else { continue }
+            guard isTranscriptDisplayRole(roleStr) else { continue }
+            guard let rawContent = extractText(from: obj) else { continue }
+            let content = prepareDisplayContent(from: rawContent)
+            let fullContent = fullContentIfNeeded(from: rawContent, displayContent: content)
+            guard !content.isEmpty else { continue }
 
             let role = MessageRole(rawString: roleStr)
             let key = MatchKey(roleRaw: role.rawValue, content: content)
-            // Reuse an existing bubble ID (temp- or stream-) if it matches by role+content.
-            // Covers both optimistic user messages and just-finalized streaming bubbles,
-            // preventing SwiftUI from animating the message out and back in.
+            // Reuse an existing local bubble ID if it matches by role+content.
+            // Covers optimistic user messages, active streams, and chat.final
+            // projections, preventing SwiftUI from animating the message out and back in.
             let stableId = existingStableIds[key] ?? "\(sessionKey)-h\(index)"
             resultKeys.insert(key)
 
@@ -374,21 +396,26 @@ final class MessageStore {
                 sessionKey: sessionKey,
                 role: role,
                 content: content,
+                fullContent: fullContent,
                 isStreaming: false,
                 createdAt: Date()
             ))
         }
 
-        // Keep stream bubbles (active or just-finalized) not yet confirmed in history.
-        // Guards against the timing gap between chat.final and gateway commit where a
-        // silentReload could otherwise wipe the assistant message before it lands.
-        let unresolved = streamBubbles.filter {
+        // Keep local bubbles (active streams and chat.final projections) not yet
+        // confirmed in history. This guards the timing gap where chat.final has
+        // already rendered the assistant answer but chat.history is still built
+        // from the previous durable transcript; dropping final- bubbles here is
+        // what made the answer disappear until leaving/reopening the thread.
+        let unresolved = ephemeralBubbles.filter {
             !resultKeys.contains(MatchKey(roleRaw: $0.role.rawValue, content: $0.content))
         }
 
-        // Tool messages are client-projected from chat events; chat.history does not
-        // emit them as text, so preserve any we have to avoid losing tool-call UI.
-        messages = result + unresolved + toolMessages + failedBubbles
+        // Tool messages are client-projected live UI, not durable chat transcript.
+        // Preserve only currently-streaming tools during an in-flight run; completed
+        // tool rows should not stick to the bottom after the assistant finalizes.
+        let activeToolMessages = toolMessages.filter { $0.isStreaming }
+        messages = result + unresolved + activeToolMessages + failedBubbles
         saveMessageCache(messages)
 
         // The gateway returns up to `limit` most-recent messages. If it returned
@@ -440,12 +467,20 @@ final class MessageStore {
         }
     }
 
+    private func payloadBelongsToSession(_ payload: [String: JSONValue]) -> Bool {
+        if let skVal = payload["sessionKey"], case .string(let sk) = skVal {
+            return sk == sessionKey
+        }
+        if let keyVal = payload["key"], case .string(let key) = keyVal {
+            return key == sessionKey
+        }
+        return false
+    }
+
     // MARK: - Private: chat event (streaming)
 
     private func handleChatEvent(_ payload: [String: JSONValue]) {
-        guard let skVal = payload["sessionKey"],
-              case .string(let sk) = skVal,
-              sk == sessionKey else { return }
+        guard payloadBelongsToSession(payload) else { return }
         guard let stateVal = payload["state"],
               case .string(let state) = stateVal else { return }
 
@@ -461,8 +496,10 @@ final class MessageStore {
         case "delta":
             responseNotificationTask?.cancel()
             guard let msgVal = payload["message"],
-                  let text = extractText(from: msgVal),
-                  !text.isEmpty else { return }
+                  let rawText = extractText(from: msgVal) else { return }
+            let text = prepareDisplayContent(from: rawText)
+            let fullText = fullContentIfNeeded(from: rawText, displayContent: text)
+            guard !text.isEmpty else { return }
 
             // Keep sessionModel up-to-date if the gateway includes it in the delta payload
             if let modelVal = payload["model"], case .string(let m) = modelVal, !m.isEmpty {
@@ -477,20 +514,25 @@ final class MessageStore {
 
             let thinkingText: String?
             if case .object(let msgObj) = msgVal {
-                thinkingText = extractThinkingText(from: msgObj)
+                thinkingText = extractThinkingText(from: msgObj).map(prepareAuxiliaryContent)
             } else {
                 thinkingText = nil
             }
 
-            if let idx = messages.firstIndex(where: { $0.id == streamId }) {
-                messages[idx].content = text
-                messages[idx].thinkingContent = thinkingText
+            if messages.contains(where: { $0.id == streamId }) {
+                pendingStreamUpdates[streamId] = PendingStreamUpdate(
+                    content: text,
+                    fullContent: fullText,
+                    thinkingContent: thinkingText
+                )
+                scheduleStreamFlush()
             } else {
                 messages.append(ClawMessage(
                     id: streamId,
                     sessionKey: sessionKey,
                     role: .assistant,
                     content: text,
+                    fullContent: fullText,
                     isStreaming: true,
                     createdAt: Date(),
                     thinkingContent: thinkingText
@@ -498,26 +540,32 @@ final class MessageStore {
             }
 
         case "final":
+            flushPendingStreamUpdates()
             // Some gateway paths include the completed assistant message directly
             // on chat.final. Do not wait for a later history reload in that case —
             // otherwise a foreground chat can sit on the reasoning/tool UI until
             // the user leaves and reopens the thread.
             if let msgVal = payload["message"],
                case .object(let obj) = msgVal,
-               let content = extractText(from: obj), !content.isEmpty {
-                let role: MessageRole
-                if let roleVal = obj["role"], case .string(let roleStr) = roleVal {
-                    role = MessageRole(rawString: roleStr)
-                } else {
-                    role = .assistant
+               let rawContent = extractText(from: obj) {
+                let content = prepareDisplayContent(from: rawContent)
+                let fullContent = fullContentIfNeeded(from: rawContent, displayContent: content)
+                if !content.isEmpty {
+                    let role: MessageRole
+                    if let roleVal = obj["role"], case .string(let roleStr) = roleVal {
+                        role = MessageRole(rawString: roleStr)
+                    } else {
+                        role = .assistant
+                    }
+                    upsertFinishedAssistantMessage(
+                        role: role,
+                        content: content,
+                        messageId: "final-\(runId)",
+                        streamId: streamId,
+                        fullContent: fullContent,
+                        scheduleNotification: false
+                    )
                 }
-                upsertFinishedAssistantMessage(
-                    role: role,
-                    content: content,
-                    messageId: "final-\(runId)",
-                    streamId: streamId,
-                    scheduleNotification: false
-                )
             }
 
             // Mark streaming bubble as not-streaming; the session.message event
@@ -526,37 +574,65 @@ final class MessageStore {
                 messages[idx].isStreaming = false
             }
             LiveActivityManager.shared.terminateActivity()
-            // Clear any tool bubbles from this run that never received an "end" event
-            messages.indices.forEach { i in
-                if messages[i].role == .tool && messages[i].isStreaming && messages[i].id.hasPrefix("tool-\(runId)-") {
-                    messages[i].isStreaming = false
-                }
-            }
+            clearStreamingStateForFinishedRun(runId: runId)
             refreshTranscriptAfterFinal()
 
         case "aborted", "error":
             responseNotificationTask?.cancel()
+            pendingStreamUpdates.removeValue(forKey: streamId)
             messages.removeAll { $0.id == streamId }
             LiveActivityManager.shared.terminateActivity()
-            // Clear any tool bubbles from this run that never received an "end" event
-            messages.indices.forEach { i in
-                if messages[i].role == .tool && messages[i].isStreaming && messages[i].id.hasPrefix("tool-\(runId)-") {
-                    messages[i].isStreaming = false
-                }
-            }
+            clearStreamingStateForFinishedRun(runId: runId)
 
         default:
             break
         }
     }
 
+    private func scheduleStreamFlush() {
+        guard streamFlushTask == nil else { return }
+        streamFlushTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 80_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self?.flushPendingStreamUpdates()
+            }
+        }
+    }
+
+    private func flushPendingStreamUpdates() {
+        streamFlushTask?.cancel()
+        streamFlushTask = nil
+        guard !pendingStreamUpdates.isEmpty else { return }
+        let updates = pendingStreamUpdates
+        pendingStreamUpdates.removeAll(keepingCapacity: true)
+        for (streamId, update) in updates {
+            guard let idx = messages.firstIndex(where: { $0.id == streamId }) else { continue }
+            messages[idx].content = update.content
+            messages[idx].fullContent = update.fullContent
+            messages[idx].thinkingContent = update.thinkingContent
+        }
+    }
+
+    private func clearStreamingStateForFinishedRun(runId: String) {
+        messages.indices.forEach { i in
+            if messages[i].id == "stream-\(runId)" {
+                messages[i].isStreaming = false
+            }
+        }
+
+        // Tool rows are transient live UI, not durable transcript messages. Final
+        // chat events are terminal for this subscribed session; remove any live
+        // tool bubble so it cannot remain stuck at the bottom after the assistant
+        // answer is already visible.
+        messages.removeAll { $0.role == .tool }
+    }
+
     // MARK: - Private: session.tool event (live tool visibility)
 
     private func handleSessionToolEvent(_ payload: [String: JSONValue]) {
         // Only handle events for our session
-        guard let skVal = payload["sessionKey"],
-              case .string(let sk) = skVal,
-              sk == sessionKey else { return }
+        guard payloadBelongsToSession(payload) else { return }
 
         guard let runIdVal = payload["runId"],
               case .string(let runId) = runIdVal else { return }
@@ -600,7 +676,7 @@ final class MessageStore {
             ))
         } else if phase == "end" || phase == "error" {
             let result: String?
-            if let rv = data["result"], case .string(let r) = rv { result = r }
+            if let rv = data["result"], case .string(let r) = rv { result = prepareAuxiliaryContent(r) }
             else { result = nil }
 
             let prefix = "tool-\(runId)-\(toolName)-"
@@ -623,21 +699,27 @@ final class MessageStore {
     // MARK: - Private: session.message event (committed messages)
 
     private func handleSessionMessageEvent(_ payload: [String: JSONValue]) {
-        guard let skVal = payload["sessionKey"],
-              case .string(let sk) = skVal,
-              sk == sessionKey else { return }
+        guard payloadBelongsToSession(payload) else { return }
 
         // The payload carries a fully-projected message — parse it directly
         // instead of refetching the entire history.
         guard let msgVal = payload["message"],
               case .object(let obj) = msgVal,
-              let roleVal = obj["role"], case .string(let roleStr) = roleVal,
-              let content = extractText(from: obj), !content.isEmpty
+              let roleVal = obj["role"], case .string(let roleStr) = roleVal
         else {
             // Required fields missing — fall back to a full reload.
             silentReload()
             return
         }
+
+        // Gateway transcript streams include non-chat records such as toolResult.
+        // Those are not user-visible assistant replies; rendering them as normal
+        // assistant bubbles is what leaves a stale-looking message at the bottom.
+        guard isTranscriptDisplayRole(roleStr) else { return }
+        guard let rawContent = extractText(from: obj) else { return }
+        let content = prepareDisplayContent(from: rawContent)
+        let fullContent = fullContentIfNeeded(from: rawContent, displayContent: content)
+        guard !content.isEmpty else { return }
 
         let role = MessageRole(rawString: roleStr)
 
@@ -659,6 +741,7 @@ final class MessageStore {
                     sessionKey: sessionKey,
                     role: .user,
                     content: content,
+                    fullContent: fullContent,
                     isStreaming: false,
                     createdAt: messages[idx].createdAt
                 )
@@ -682,6 +765,7 @@ final class MessageStore {
             content: content,
             messageId: messageId,
             streamId: nil,
+            fullContent: fullContent,
             scheduleNotification: true
         )
     }
@@ -691,6 +775,7 @@ final class MessageStore {
         content: String,
         messageId: String,
         streamId: String?,
+        fullContent: String? = nil,
         scheduleNotification: Bool
     ) {
         if let streamId,
@@ -700,6 +785,7 @@ final class MessageStore {
                 sessionKey: sessionKey,
                 role: role,
                 content: content,
+                fullContent: fullContent,
                 isStreaming: false,
                 createdAt: messages[idx].createdAt
             )
@@ -708,13 +794,14 @@ final class MessageStore {
         }
 
         if let idx = messages.firstIndex(where: {
-            $0.id.hasPrefix("stream-") && $0.role == role && $0.content == content
+            ($0.id.hasPrefix("stream-") || $0.id.hasPrefix("final-")) && $0.role == role && $0.content == content
         }) {
             messages[idx] = ClawMessage(
                 id: messageId,
                 sessionKey: sessionKey,
                 role: role,
                 content: content,
+                fullContent: fullContent,
                 isStreaming: false,
                 createdAt: messages[idx].createdAt
             )
@@ -722,13 +809,14 @@ final class MessageStore {
             return
         }
         if let idx = messages.lastIndex(where: {
-            $0.id.hasPrefix("stream-") && $0.role == role && !$0.isStreaming
+            ($0.id.hasPrefix("stream-") || $0.id.hasPrefix("final-")) && $0.role == role && !$0.isStreaming
         }) {
             messages[idx] = ClawMessage(
                 id: messageId,
                 sessionKey: sessionKey,
                 role: role,
                 content: content,
+                fullContent: fullContent,
                 isStreaming: false,
                 createdAt: messages[idx].createdAt
             )
@@ -741,6 +829,7 @@ final class MessageStore {
                 sessionKey: sessionKey,
                 role: role,
                 content: content,
+                fullContent: fullContent,
                 isStreaming: false,
                 createdAt: Date()
             ))
@@ -784,6 +873,45 @@ final class MessageStore {
     }
 
     // MARK: - Private: text extraction
+
+    private func isTranscriptDisplayRole(_ role: String) -> Bool {
+        switch role.lowercased() {
+        case "user", "assistant", "system":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func prepareDisplayContent(from text: String) -> String {
+        let sanitized = normalizedDisplayContent(from: text)
+        guard sanitized.count > Self.maxDisplayContentCharacters else { return sanitized }
+        return String(sanitized.prefix(Self.maxDisplayContentCharacters))
+            + "\n\n…[message truncated in iOS UI for stability]"
+    }
+
+    private func prepareAuxiliaryContent(_ text: String) -> String {
+        let sanitized = text.replacingOccurrences(of: "\0", with: "")
+        guard sanitized.count > Self.maxAuxiliaryContentCharacters else { return sanitized }
+        return String(sanitized.prefix(Self.maxAuxiliaryContentCharacters))
+            + "\n\n…[truncated in iOS UI]"
+    }
+
+    private func fullContentIfNeeded(from text: String, displayContent: String) -> String? {
+        let normalized = normalizedDisplayContent(from: text)
+        return normalized == displayContent ? nil : normalized
+    }
+
+    private func normalizedDisplayContent(from text: String) -> String {
+        stripLeadingCommandments(from: text).replacingOccurrences(of: "\0", with: "")
+    }
+
+    private func stripLeadingCommandments(from text: String) -> String {
+        guard text.hasPrefix("<commandments>") else { return text }
+        guard let endRange = text.range(of: "</commandments>") else { return text }
+        let remainder = text[endRange.upperBound...]
+        return String(remainder).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     private func extractText(from value: JSONValue) -> String? {
         if case .object(let obj) = value { return extractText(from: obj) }

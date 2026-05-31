@@ -16,7 +16,8 @@ struct ClawMessage: Identifiable, Hashable, Codable {
     let id: String
     let sessionKey: String
     var role: MessageRole
-    var content: String          // may grow as tokens stream in
+    var content: String          // may grow as tokens stream in; may be UI-truncated for pathological transcripts
+    var fullContent: String? = nil // original full text when content is shortened for safe rendering
     var isStreaming: Bool
     var createdAt: Date
     var sendFailed: Bool = false
@@ -40,6 +41,7 @@ struct ClawMessage: Identifiable, Hashable, Codable {
     static func == (lhs: ClawMessage, rhs: ClawMessage) -> Bool {
         lhs.id == rhs.id &&
         lhs.content == rhs.content &&
+        lhs.fullContent == rhs.fullContent &&
         lhs.isStreaming == rhs.isStreaming &&
         lhs.sendFailed == rhs.sendFailed &&
         lhs.toolResult == rhs.toolResult &&

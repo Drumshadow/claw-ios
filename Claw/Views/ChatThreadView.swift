@@ -2,6 +2,7 @@ import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
 import PDFKit
+import UIKit
 
 // MARK: - EmptyParams
 
@@ -13,6 +14,14 @@ private struct ChatBottomOffsetPreferenceKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
     }
+}
+
+private struct ChatMessageRow: Identifiable, Equatable {
+    let index: Int
+    let message: ClawMessage
+    let sameSenderAsPrevious: Bool
+
+    var id: String { message.id }
 }
 
 // MARK: - ChatThreadView
@@ -40,6 +49,7 @@ struct ChatThreadView: View {
     @State private var avatarPulse: CGFloat = 1.0
     @State private var voiceManager = VoiceInputManager()
     @State private var pendingScrollTask: Task<Void, Never>? = nil
+    @State private var hasUnseenMessages: Bool = false
     @State private var slashSuggestions: [ClawSkill] = []
     // Voice Ops Mode (operational push-to-talk, separate from compose dictation)
     @State private var voiceOpsManager = VoiceOpsManager()
@@ -143,6 +153,18 @@ struct ChatThreadView: View {
             }
             guard let session = sessionsByKey[key] else { return false }
             return session.agentStatus != .idle
+        }
+    }
+
+    private var messageRows: [ChatMessageRow] {
+        let snapshot = store.messages
+        return snapshot.enumerated().map { index, message in
+            let prevRole = index > 0 ? snapshot[index - 1].role : nil
+            return ChatMessageRow(
+                index: index,
+                message: message,
+                sameSenderAsPrevious: prevRole == message.role
+            )
         }
     }
 
@@ -462,21 +484,18 @@ struct ChatThreadView: View {
                         } else {
                             // Top sentinel — triggers `loadMore` when it appears.
                             topSentinel
-                            let messageSnapshot = Array(store.messages.enumerated())
-                            ForEach(messageSnapshot, id: \.element.id) { index, message in
-                                let prevRole = index > 0 ? messageSnapshot[index - 1].element.role : nil
-                                let sameSender = prevRole == message.role
+                            ForEach(messageRows) { row in
                                 MessageBubbleView(
-                                    message: message,
-                                    onRetry: message.sendFailed ? {
-                                        Task { await store.retrySend(messageId: message.id) }
+                                    message: row.message,
+                                    onRetry: row.message.sendFailed ? {
+                                        Task { await store.retrySend(messageId: row.message.id) }
                                     } : nil,
-                                    onDiscard: message.sendFailed ? {
-                                        store.discardFailed(messageId: message.id)
+                                    onDiscard: row.message.sendFailed ? {
+                                        store.discardFailed(messageId: row.message.id)
                                     } : nil
                                 )
-                                .id(message.id)
-                                .padding(.top, sameSender ? 0 : 4)
+                                .id(row.id)
+                                .padding(.top, row.sameSenderAsPrevious ? 0 : 4)
                             }
                             if isAgentActive && !hasActiveStream {
                                 TypingIndicatorView()
@@ -515,6 +534,9 @@ struct ChatThreadView: View {
                     let isPrepending = store.scrollAnchorAfterPrepend != nil ||
                                        store.isLoadingMore ||
                                        pendingScrollRestore != nil
+                    if !isNearBottom && !forceScrollAfterSend && newCount > oldCount {
+                        hasUnseenMessages = true
+                    }
                     guard !isPrepending, newCount > oldCount, isNearBottom || forceScrollAfterSend else { return }
                     forceScrollAfterSend = false
                     // Debounce: cancel any in-flight scroll and wait 50ms for layout to settle
@@ -525,12 +547,16 @@ struct ChatThreadView: View {
                         try? await Task.sleep(nanoseconds: 50_000_000)
                         guard !Task.isCancelled else { return }
                         proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                        hasUnseenMessages = false
                     }
                 }
                 .onChange(of: store.messages.last?.content) { _, _ in
                     // Follow streaming content while near bottom. 120ms debounce coalesces
                     // rapid per-token updates into at most ~8 scrolls/sec instead of one per
                     // streaming chunk, eliminating the preference-key feedback loop.
+                    if !isNearBottom && !forceScrollAfterSend {
+                        hasUnseenMessages = true
+                    }
                     guard store.scrollAnchorAfterPrepend == nil,
                           pendingScrollRestore == nil,
                           isNearBottom || forceScrollAfterSend else { return }
@@ -540,6 +566,7 @@ struct ChatThreadView: View {
                         guard !Task.isCancelled else { return }
                         proxy.scrollTo("bottom-anchor", anchor: .bottom)
                         forceScrollAfterSend = false
+                        hasUnseenMessages = false
                     }
                 }
                 .onChange(of: store.isLoading) { _, isLoading in
@@ -551,6 +578,7 @@ struct ChatThreadView: View {
                             try? await Task.sleep(nanoseconds: 150_000_000)
                             scrollToBottom(proxy: proxy, animated: false)
                             isNearBottom = true
+                            hasUnseenMessages = false
                         }
                     }
                 }
@@ -560,6 +588,7 @@ struct ChatThreadView: View {
                         if pendingScrollRestore == nil, !store.messages.isEmpty {
                             scrollToBottom(proxy: proxy, animated: false)
                             isNearBottom = true
+                            hasUnseenMessages = false
                         }
                     }
                 }
@@ -571,6 +600,29 @@ struct ChatThreadView: View {
                     Task { @MainActor in
                         try? await Task.sleep(nanoseconds: 100_000_000)
                         pendingScrollRestore = nil
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    if hasUnseenMessages {
+                        Button {
+                            pendingScrollTask?.cancel()
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                            }
+                            hasUnseenMessages = false
+                            isNearBottom = true
+                        } label: {
+                            Label("New messages", systemImage: "arrow.down.circle.fill")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(Color.clawTextStrong)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(Capsule().fill(Color.clawBgElevated))
+                                .overlay(Capsule().strokeBorder(Color.clawBorderStrong, lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.bottom, isAgentActive ? 60 : 14)
+                        .transition(.opacity.combined(with: .scale(scale: 0.95)))
                     }
                 }
             }
@@ -878,6 +930,17 @@ struct ChatThreadView: View {
                     handleFileImport(result: result)
                 }
 
+                Button {
+                    pasteClipboardText()
+                } label: {
+                    Image(systemName: "doc.on.clipboard")
+                        .font(.system(size: 19, weight: .medium))
+                        .foregroundStyle(Color.clawMuted)
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Paste from clipboard")
+
                 TextField("Message", text: $composeText, axis: .vertical)
                     .font(.system(size: 15))
                     .foregroundStyle(Color.clawText)
@@ -993,6 +1056,25 @@ struct ChatThreadView: View {
         Task {
             try? await store.send(text: text, attachments: attachments)
         }
+    }
+
+    private func pasteClipboardText() {
+        let pasteboard = UIPasteboard.general
+        let pasted = pasteboard.strings?.filter { !$0.isEmpty }.joined(separator: "\n")
+            ?? pasteboard.url?.absoluteString
+            ?? pasteboard.string
+        guard let pasted, !pasted.isEmpty else {
+            isComposeFocused = true
+            return
+        }
+
+        let needsSeparator = !composeText.isEmpty &&
+            !composeText.hasSuffix(" ") &&
+            !composeText.hasSuffix("\n") &&
+            !pasted.hasPrefix(" ") &&
+            !pasted.hasPrefix("\n")
+        composeText += (needsSeparator ? " " : "") + pasted
+        isComposeFocused = true
     }
 
     // MARK: - Attachment loading
