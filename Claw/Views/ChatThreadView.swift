@@ -569,6 +569,25 @@ struct ChatThreadView: View {
                         hasUnseenMessages = false
                     }
                 }
+                .onChange(of: isComposeFocused) { _, focused in
+                    guard focused,
+                          pendingScrollRestore == nil,
+                          !store.messages.isEmpty,
+                          isNearBottom || forceScrollAfterSend else { return }
+                    // Let SwiftUI begin its keyboard-safe-area layout pass, then
+                    // follow the keyboard animation so the latest message stays
+                    // above the composer on initial focus.
+                    pendingScrollTask?.cancel()
+                    pendingScrollTask = Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 180_000_000)
+                        guard !Task.isCancelled else { return }
+                        withAnimation(.easeOut(duration: 0.22)) {
+                            proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                        }
+                        forceScrollAfterSend = false
+                        hasUnseenMessages = false
+                    }
+                }
                 .onChange(of: store.isLoading) { _, isLoading in
                     // Yield one run-loop turn after load so LazyVStack finishes layout.
                     // On cold-open, always land at the latest message; after that,
