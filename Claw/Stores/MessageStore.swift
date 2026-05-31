@@ -363,7 +363,9 @@ final class MessageStore {
             guard case .object(let obj) = item else { continue }
             guard let roleVal = obj["role"], case .string(let roleStr) = roleVal else { continue }
             guard isTranscriptDisplayRole(roleStr) else { continue }
-            guard let content = extractText(from: obj), !content.isEmpty else { continue }
+            guard let rawContent = extractText(from: obj) else { continue }
+            let content = stripLeadingCommandments(from: rawContent)
+            guard !content.isEmpty else { continue }
 
             let role = MessageRole(rawString: roleStr)
             let key = MatchKey(roleRaw: role.rawValue, content: content)
@@ -658,7 +660,9 @@ final class MessageStore {
         // Those are not user-visible assistant replies; rendering them as normal
         // assistant bubbles is what leaves a stale-looking message at the bottom.
         guard isTranscriptDisplayRole(roleStr) else { return }
-        guard let content = extractText(from: obj), !content.isEmpty else { return }
+        guard let rawContent = extractText(from: obj) else { return }
+        let content = stripLeadingCommandments(from: rawContent)
+        guard !content.isEmpty else { return }
 
         let role = MessageRole(rawString: roleStr)
 
@@ -813,6 +817,13 @@ final class MessageStore {
         default:
             return false
         }
+    }
+
+    private func stripLeadingCommandments(from text: String) -> String {
+        guard text.hasPrefix("<commandments>") else { return text }
+        guard let endRange = text.range(of: "</commandments>") else { return text }
+        let remainder = text[endRange.upperBound...]
+        return String(remainder).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func extractText(from value: JSONValue) -> String? {
