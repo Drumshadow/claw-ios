@@ -30,6 +30,7 @@ final class MessageStore {
 
     private static let messageCacheLimit = 50
     private static let maxDisplayContentCharacters = 80_000
+    private static let maxAuxiliaryContentCharacters = 12_000
 
     /// Locally-projected bubbles that should be replaced by durable transcript
     /// messages once the gateway commit arrives. `final-` covers chat.final
@@ -50,6 +51,11 @@ final class MessageStore {
         let toCache = messages
             .filter { !$0.isStreaming && !$0.sendFailed && $0.role != .tool && !Self.isEphemeralMessageId($0.id) }
             .suffix(Self.messageCacheLimit)
+            .map { msg -> ClawMessage in
+                var cached = msg
+                cached.fullContent = nil
+                return cached
+            }
         if let data = try? JSONEncoder().encode(Array(toCache)) {
             UserDefaults.standard.set(data, forKey: messageCacheKey)
         }
@@ -71,6 +77,13 @@ final class MessageStore {
     nonisolated(unsafe) private var eventTask: Task<Void, Never>?
     nonisolated(unsafe) private var silentReloadTask: Task<Void, Never>?
     nonisolated(unsafe) private var responseNotificationTask: Task<Void, Never>?
+    nonisolated(unsafe) private var streamFlushTask: Task<Void, Never>?
+    private struct PendingStreamUpdate {
+        let content: String
+        let fullContent: String?
+        let thinkingContent: String?
+    }
+    private var pendingStreamUpdates: [String: PendingStreamUpdate] = [:]
     // Tracks run IDs we've started Live Activities for. Capped to prevent
     // unbounded growth during long app sessions with many agent runs.
     private var seenRunIds: Set<String> = []
@@ -96,6 +109,7 @@ final class MessageStore {
         eventTask?.cancel()
         silentReloadTask?.cancel()
         responseNotificationTask?.cancel()
+        streamFlushTask?.cancel()
     }
 
     // MARK: - Subscribe / Unsubscribe
@@ -366,6 +380,7 @@ final class MessageStore {
             guard isTranscriptDisplayRole(roleStr) else { continue }
             guard let rawContent = extractText(from: obj) else { continue }
             let content = prepareDisplayContent(from: rawContent)
+            let fullContent = fullContentIfNeeded(from: rawContent, displayContent: content)
             guard !content.isEmpty else { continue }
 
             let role = MessageRole(rawString: roleStr)
@@ -381,6 +396,7 @@ final class MessageStore {
                 sessionKey: sessionKey,
                 role: role,
                 content: content,
+                fullContent: fullContent,
                 isStreaming: false,
                 createdAt: Date()
             ))
@@ -482,6 +498,7 @@ final class MessageStore {
             guard let msgVal = payload["message"],
                   let rawText = extractText(from: msgVal) else { return }
             let text = prepareDisplayContent(from: rawText)
+            let fullText = fullContentIfNeeded(from: rawText, displayContent: text)
             guard !text.isEmpty else { return }
 
             // Keep sessionModel up-to-date if the gateway includes it in the delta payload
@@ -497,20 +514,25 @@ final class MessageStore {
 
             let thinkingText: String?
             if case .object(let msgObj) = msgVal {
-                thinkingText = extractThinkingText(from: msgObj)
+                thinkingText = extractThinkingText(from: msgObj).map(prepareAuxiliaryContent)
             } else {
                 thinkingText = nil
             }
 
-            if let idx = messages.firstIndex(where: { $0.id == streamId }) {
-                messages[idx].content = text
-                messages[idx].thinkingContent = thinkingText
+            if messages.contains(where: { $0.id == streamId }) {
+                pendingStreamUpdates[streamId] = PendingStreamUpdate(
+                    content: text,
+                    fullContent: fullText,
+                    thinkingContent: thinkingText
+                )
+                scheduleStreamFlush()
             } else {
                 messages.append(ClawMessage(
                     id: streamId,
                     sessionKey: sessionKey,
                     role: .assistant,
                     content: text,
+                    fullContent: fullText,
                     isStreaming: true,
                     createdAt: Date(),
                     thinkingContent: thinkingText
@@ -518,6 +540,7 @@ final class MessageStore {
             }
 
         case "final":
+            flushPendingStreamUpdates()
             // Some gateway paths include the completed assistant message directly
             // on chat.final. Do not wait for a later history reload in that case —
             // otherwise a foreground chat can sit on the reasoning/tool UI until
@@ -526,6 +549,7 @@ final class MessageStore {
                case .object(let obj) = msgVal,
                let rawContent = extractText(from: obj) {
                 let content = prepareDisplayContent(from: rawContent)
+                let fullContent = fullContentIfNeeded(from: rawContent, displayContent: content)
                 if !content.isEmpty {
                     let role: MessageRole
                     if let roleVal = obj["role"], case .string(let roleStr) = roleVal {
@@ -538,6 +562,7 @@ final class MessageStore {
                         content: content,
                         messageId: "final-\(runId)",
                         streamId: streamId,
+                        fullContent: fullContent,
                         scheduleNotification: false
                     )
                 }
@@ -554,12 +579,38 @@ final class MessageStore {
 
         case "aborted", "error":
             responseNotificationTask?.cancel()
+            pendingStreamUpdates.removeValue(forKey: streamId)
             messages.removeAll { $0.id == streamId }
             LiveActivityManager.shared.terminateActivity()
             clearStreamingStateForFinishedRun(runId: runId)
 
         default:
             break
+        }
+    }
+
+    private func scheduleStreamFlush() {
+        guard streamFlushTask == nil else { return }
+        streamFlushTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 80_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self?.flushPendingStreamUpdates()
+            }
+        }
+    }
+
+    private func flushPendingStreamUpdates() {
+        streamFlushTask?.cancel()
+        streamFlushTask = nil
+        guard !pendingStreamUpdates.isEmpty else { return }
+        let updates = pendingStreamUpdates
+        pendingStreamUpdates.removeAll(keepingCapacity: true)
+        for (streamId, update) in updates {
+            guard let idx = messages.firstIndex(where: { $0.id == streamId }) else { continue }
+            messages[idx].content = update.content
+            messages[idx].fullContent = update.fullContent
+            messages[idx].thinkingContent = update.thinkingContent
         }
     }
 
@@ -625,7 +676,7 @@ final class MessageStore {
             ))
         } else if phase == "end" || phase == "error" {
             let result: String?
-            if let rv = data["result"], case .string(let r) = rv { result = r }
+            if let rv = data["result"], case .string(let r) = rv { result = prepareAuxiliaryContent(r) }
             else { result = nil }
 
             let prefix = "tool-\(runId)-\(toolName)-"
@@ -667,6 +718,7 @@ final class MessageStore {
         guard isTranscriptDisplayRole(roleStr) else { return }
         guard let rawContent = extractText(from: obj) else { return }
         let content = prepareDisplayContent(from: rawContent)
+        let fullContent = fullContentIfNeeded(from: rawContent, displayContent: content)
         guard !content.isEmpty else { return }
 
         let role = MessageRole(rawString: roleStr)
@@ -689,6 +741,7 @@ final class MessageStore {
                     sessionKey: sessionKey,
                     role: .user,
                     content: content,
+                    fullContent: fullContent,
                     isStreaming: false,
                     createdAt: messages[idx].createdAt
                 )
@@ -712,6 +765,7 @@ final class MessageStore {
             content: content,
             messageId: messageId,
             streamId: nil,
+            fullContent: fullContent,
             scheduleNotification: true
         )
     }
@@ -721,6 +775,7 @@ final class MessageStore {
         content: String,
         messageId: String,
         streamId: String?,
+        fullContent: String? = nil,
         scheduleNotification: Bool
     ) {
         if let streamId,
@@ -730,6 +785,7 @@ final class MessageStore {
                 sessionKey: sessionKey,
                 role: role,
                 content: content,
+                fullContent: fullContent,
                 isStreaming: false,
                 createdAt: messages[idx].createdAt
             )
@@ -745,6 +801,7 @@ final class MessageStore {
                 sessionKey: sessionKey,
                 role: role,
                 content: content,
+                fullContent: fullContent,
                 isStreaming: false,
                 createdAt: messages[idx].createdAt
             )
@@ -759,6 +816,7 @@ final class MessageStore {
                 sessionKey: sessionKey,
                 role: role,
                 content: content,
+                fullContent: fullContent,
                 isStreaming: false,
                 createdAt: messages[idx].createdAt
             )
@@ -771,6 +829,7 @@ final class MessageStore {
                 sessionKey: sessionKey,
                 role: role,
                 content: content,
+                fullContent: fullContent,
                 isStreaming: false,
                 createdAt: Date()
             ))
@@ -825,11 +884,26 @@ final class MessageStore {
     }
 
     private func prepareDisplayContent(from text: String) -> String {
-        let stripped = stripLeadingCommandments(from: text)
-        let sanitized = stripped.replacingOccurrences(of: "\0", with: "")
+        let sanitized = normalizedDisplayContent(from: text)
         guard sanitized.count > Self.maxDisplayContentCharacters else { return sanitized }
         return String(sanitized.prefix(Self.maxDisplayContentCharacters))
             + "\n\n…[message truncated in iOS UI for stability]"
+    }
+
+    private func prepareAuxiliaryContent(_ text: String) -> String {
+        let sanitized = text.replacingOccurrences(of: "\0", with: "")
+        guard sanitized.count > Self.maxAuxiliaryContentCharacters else { return sanitized }
+        return String(sanitized.prefix(Self.maxAuxiliaryContentCharacters))
+            + "\n\n…[truncated in iOS UI]"
+    }
+
+    private func fullContentIfNeeded(from text: String, displayContent: String) -> String? {
+        let normalized = normalizedDisplayContent(from: text)
+        return normalized == displayContent ? nil : normalized
+    }
+
+    private func normalizedDisplayContent(from text: String) -> String {
+        stripLeadingCommandments(from: text).replacingOccurrences(of: "\0", with: "")
     }
 
     private func stripLeadingCommandments(from text: String) -> String {

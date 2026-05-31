@@ -73,6 +73,17 @@ struct MessageBubbleView: View {
                         .foregroundStyle(Color.clawText)
                 }
             }
+            if message.fullContent != nil {
+                Button {
+                    showTextSelectionSheet = true
+                } label: {
+                    Label("Show full message", systemImage: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.clawAccent)
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -85,13 +96,13 @@ struct MessageBubbleView: View {
                 Label("Select Text", systemImage: "text.cursor")
             }
             Button {
-                UIPasteboard.general.string = message.content
+                UIPasteboard.general.string = fullText
             } label: {
                 Label("Copy All", systemImage: "doc.on.doc")
             }
         }
         .sheet(isPresented: $showTextSelectionSheet) {
-            SelectableMessageTextSheet(text: message.content)
+            SelectableMessageTextSheet(text: fullText)
         }
     }
 
@@ -166,6 +177,10 @@ struct MessageBubbleView: View {
 
     private var displayText: String {
         message.isStreaming ? message.content + "▌" : message.content
+    }
+
+    private var fullText: String {
+        message.fullContent ?? message.content
     }
 
     // MARK: - Timestamp
