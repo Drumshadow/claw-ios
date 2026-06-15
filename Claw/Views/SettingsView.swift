@@ -37,6 +37,7 @@ struct SettingsView: View {
                 gatewaysSection
                 currentConnectionSection
                 platformSection
+                toolApprovalsSection
                 appReviewSection
                 powerSection
                 commandmentsSection
@@ -316,6 +317,48 @@ struct SettingsView: View {
                     .foregroundStyle(Color.clawMuted)
             }
         }
+    }
+
+    // MARK: - Tool Approvals section
+
+    @State private var approvalsEnabled = ToolApprovalSettings.isEnabled
+
+    private var toolApprovalsSection: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { approvalsEnabled },
+                set: { enabled in
+                    guard enabled != approvalsEnabled else { return }
+                    approvalsEnabled = enabled
+                    ToolApprovalSettings.isEnabled = enabled
+                    // Reconnect so the gateway negotiates the new scope set. Turning this on
+                    // adds operator.approvals, which the gateway treats as a scope upgrade and
+                    // routes to the pairing screen for a one-time re-approval.
+                    let config = appState.selectedConfig
+                    dismiss()
+                    Task {
+                        await appState.disconnect()
+                        if let config { await appState.connect(to: config) }
+                    }
+                }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Tool Approvals")
+                        .foregroundStyle(Color.clawTextStrong)
+                    Text("Allow or deny agent tool calls from your phone and Watch")
+                        .font(.caption)
+                        .foregroundStyle(Color.clawMuted)
+                }
+            }
+            .tint(Color.clawAccent)
+        } header: {
+            Text("Tool Approvals")
+                .foregroundStyle(Color.clawMuted)
+        } footer: {
+            Text("When on, Claw receives tool-approval requests from the gateway and lets you allow or deny them (including on your Apple Watch). Turning this on requests an additional permission, so your gateway will ask you to approve this device once more.")
+                .foregroundStyle(Color.clawMuted.opacity(0.8))
+        }
+        .listRowBackground(Color.clawCard)
     }
 
     // MARK: - App Review section

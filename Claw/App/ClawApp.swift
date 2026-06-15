@@ -11,6 +11,7 @@ struct ClawApp: App {
     @State private var gatewayStore = GatewayStore()
     @State private var pushManager = PushManager()
     @State private var router = NavigationRouter()
+    @State private var shareProcessor = ShareIntakeProcessor()
     @State private var showSplash: Bool = true
 
     var body: some Scene {
@@ -44,6 +45,12 @@ struct ClawApp: App {
                                 if pushManager.apnsToken != nil {
                                     await pushManager.registerWithGateway()
                                 }
+                            }
+                            // Deliver any share items queued while offline — but NOT while the
+                            // review sheet is open, or the drain could send an item the user is
+                            // still editing (which would then be re-sent as a new finalItem).
+                            if let client = appState.activeClient, !router.showShareIntake {
+                                shareProcessor.process(client: client, sessionStore: nil)
                             }
                         }
                         if case .disconnected = newState {
@@ -81,21 +88,39 @@ struct ClawApp: App {
                 if let firstItem = router.pendingShareItems.first {
                     ShareIntakeView(
                         item: firstItem,
+                        onSend: { finalItem in
+                            guard let client = appState.activeClient else { return false }
+                            return await shareProcessor.deliver(finalItem, client: client, sessionStore: nil)
+                        },
                         onDelivered: { _ in
-                            // If there are more items, pop and show the next one
+                            // Advance to the next shared item, or close when done.
                             if !router.pendingShareItems.isEmpty {
                                 router.pendingShareItems.removeFirst()
                             }
                             if router.pendingShareItems.isEmpty {
                                 router.showShareIntake = false
+                                // Flush anything still queued (e.g. an item sent while briefly
+                                // offline) now that the sheet is closed and the drain is allowed.
+                                if let client = appState.activeClient {
+                                    shareProcessor.process(client: client, sessionStore: nil)
+                                }
                             }
                         },
                         onDismiss: {
+                            // Cancel = discard the shares the user backed out of, so the drain
+                            // doesn't later deliver them anyway.
+                            for shareItem in router.pendingShareItems {
+                                ShareIntakeQueue.shared.remove(id: shareItem.id)
+                            }
                             router.showShareIntake = false
                             router.pendingShareItems.removeAll()
                         }
                     )
                     .presentationBackground(Color.clawBg)
+                    // Force an explicit choice: a swipe-dismiss would bypass both Cancel
+                    // (which discards) and Send, leaving the item queued for the drain to
+                    // deliver later — i.e. silently sending a share the user backed out of.
+                    .interactiveDismissDisabled()
                 }
             }
         }

@@ -40,6 +40,30 @@ final class ShareIntakeProcessor {
         processingTask = nil
     }
 
+    /// Deliver a single, already-enqueued item to the gateway immediately, reporting whether
+    /// it was sent. Used by the in-app share sheet so it can show real success/failure; the
+    /// batch `process` path handles items queued while offline. Idempotent per item id, so a
+    /// later batch drain of the same item can't double-send it.
+    func deliver(_ item: ShareIntakeItem, client: GatewayClient, sessionStore: SessionStore?) async -> Bool {
+        queue.updateStatus(id: item.id, status: .sending)
+        let sessionKey = resolveSessionKey(for: item, sessionStore: sessionStore)
+        do {
+            let params = ProcessorSendParams(
+                sessionKey: sessionKey,
+                message: item.composeAgentMessage(),
+                idempotencyKey: item.id.uuidString
+            )
+            _ = try await client.send(method: GatewayMethod.chatSend, params: params)
+            queue.markDelivered(id: item.id)
+            return true
+        } catch {
+            // Transient send failure — keep it drain-eligible (.ready) so the next connect
+            // retries, rather than stranding it in a terminal state nothing ever resends.
+            queue.updateStatus(id: item.id, status: .ready)
+            return false
+        }
+    }
+
     // MARK: - Processing pipeline
 
     private func processAll(client: GatewayClient, sessionStore: SessionStore?) async {
@@ -82,7 +106,8 @@ final class ShareIntakeProcessor {
                 _ = try await client.send(method: GatewayMethod.chatSend, params: params)
                 queue.markDelivered(id: item.id)
             } catch {
-                queue.markFailed(id: item.id)
+                // Keep failed sends drain-eligible so a later connect retries them.
+                queue.updateStatus(id: item.id, status: .ready)
             }
         }
     }

@@ -253,7 +253,15 @@ actor GatewayClient {
         let gatewayID = config.id.uuidString
         let storedToken = await identity.loadDeviceToken(forGatewayID: gatewayID) ?? ""
 
-        let scopes = ["operator.read", "operator.write"]
+        // operator.approvals lets the gateway deliver exec.approval.requested events and
+        // authorize exec.approval.resolve (the tool-approval flow). It is requested ONLY when
+        // the user opts in (Settings → Tool Approvals): the gateway treats it as a scope
+        // upgrade requiring a one-time device re-approval, so devices that never use approvals
+        // are never bounced to the pairing screen.
+        var scopes = ["operator.read", "operator.write"]
+        if ToolApprovalSettings.isEnabled {
+            scopes.append("operator.approvals")
+        }
         let signature = try await identity.signV3(
             deviceID: deviceID,
             clientID: "openclaw-ios",
