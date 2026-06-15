@@ -26,7 +26,6 @@ struct ReplayStep: Identifiable {
 // MARK: - ReplayBranch
 //
 // An alternate branch in the conversation — e.g., a retry or a parallel sub-agent.
-// Gateway contract: GatewayMethod.sessionBranches → { branches: [ReplayBranch] }
 
 struct ReplayBranch: Identifiable, Hashable {
     let id: String

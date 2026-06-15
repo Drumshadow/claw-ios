@@ -9,7 +9,6 @@ import Foundation
 // Gateway contract:
 //   - List:   GatewayMethod.memoryTimelineList   → { events: [MemoryTimelineEvent], total: Int }
 //   - Search: GatewayMethod.memoryTimelineSearch → { events: [MemoryTimelineEvent] }
-//   - Add:    GatewayMethod.memoryTimelineAdd    → MemoryTimelineEvent
 //   Event:    GatewayEventName.memoryTimelineEvent (live push from gateway)
 
 struct MemoryTimelineEvent: Identifiable, Hashable {

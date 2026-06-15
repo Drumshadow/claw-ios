@@ -489,7 +489,7 @@ actor GatewayClient {
     }
 
     private func sendPing() async {
-        let pingFrame: [String: String] = ["type": "req", "id": UUID().uuidString, "method": "ping"]
+        let pingFrame: [String: String] = ["type": "req", "id": UUID().uuidString, "method": GatewayMethod.ping]
         guard let data = try? encoder.encode(pingFrame),
               let str = String(data: data, encoding: .utf8),
               let task = webSocketTask else { return }

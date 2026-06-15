@@ -6,13 +6,6 @@ enum GatewayMethod {
     static let connect = "connect"
     static let ping = "ping"
     static let pong = "pong"
-    static let disconnect = "disconnect"
-
-    static let operatorSendMessage = "operator.message.send"
-    static let operatorListSessions = "operator.sessions.list"
-    static let operatorGetSession = "operator.session.get"
-    static let operatorApproveDevice = "operator.device.approve"
-    static let operatorListDevices = "operator.devices.list"
 
     static let sessionsList = "sessions.list"
     static let sessionsCreate = "sessions.create"
@@ -66,38 +59,29 @@ enum GatewayMethod {
     static let terminalSessionUnsubscribe = "terminal.session.unsubscribe"
     static let terminalSessionHistory = "terminal.session.history"
     static let terminalSessionInput = "terminal.session.input"
-    static let terminalSessionResize = "terminal.session.resize"
     static let terminalSessionKill = "terminal.session.kill"
 
     static let runbooksList = "runbooks.list"
     static let runbooksCreate = "runbooks.create"
     static let runbooksExecute = "runbooks.execute"
-    static let runbooksExecutionStatus = "runbooks.execution.status"
     static let runbooksExecutionApprove = "runbooks.execution.approve"
     static let runbooksExecutionDeny = "runbooks.execution.deny"
     static let runbooksExecutionAbort = "runbooks.execution.abort"
     static let runbooksExecutionRollback = "runbooks.execution.rollback"
 
     static let topologySnapshot = "topology.snapshot"
-    static let topologySubscribe = "topology.subscribe"
     static let topologyNodeCreate = "topology.node.create"
 
     static let modelsList = "models.list"
-    static let modelsCapabilities = "models.capabilities"
-    static let routingGet = "routing.get"
     static let routingSet = "routing.set"
-    static let routingProfiles = "routing.profiles"
 
     static let backgroundAgentsList = "background.agents.list"
-    static let backgroundAgentCreate = "background.agent.create"
     static let backgroundAgentDelete = "background.agent.delete"
     static let backgroundAgentToggle = "background.agent.toggle"
-    static let backgroundAgentAcknowledge = "background.agent.acknowledge"
 
     static let incidentsList = "incidents.list"
     static let incidentAcknowledge = "incident.acknowledge"
     static let incidentResolve = "incident.resolve"
-    static let incidentAddComment = "incident.comment"
 
     static let proposalsList = "proposals.list"
     static let proposalApprove = "proposal.approve"
@@ -105,13 +89,6 @@ enum GatewayMethod {
 
     static let memoryTimelineList = "memory.timeline.list"
     static let memoryTimelineSearch = "memory.timeline.search"
-    static let memoryTimelineAdd = "memory.timeline.add"
-
-    static let sessionReplayData = "session.replay.data"
-    static let sessionBranches = "session.branches"
-
-    static let agentNetworkState = "agents.network.state"
-    static let agentNetworkSubscribe = "agents.network.subscribe"
 }
 
 // MARK: - Agent IDs offered when creating sessions
@@ -135,11 +112,6 @@ enum GatewayAgentId {
 
 enum GatewayEventName {
     static let connectChallenge = "connect.challenge"
-    static let helloOk = "hello-ok"
-    static let sessionStarted = "session.started"
-    static let sessionEnded = "session.ended"
-    static let devicePaired = "device.paired"
-    static let devicePendingApproval = "device.pending_approval"
     static let nodeConnected = "node.connected"
     static let nodeDisconnected = "node.disconnected"
     static let nodePending = "node.pending"
@@ -174,7 +146,6 @@ enum GatewayEventName {
     static let execApprovalResolved = "exec.approval.resolved"
 
     static let snapshotCaptured = "snapshot.captured"
-    static let snapshotExpired = "snapshot.expired"
     static let rollbackCompleted = "rollback.completed"
 
     static let backgroundAgentAlert = "background.agent.alert"
@@ -183,9 +154,6 @@ enum GatewayEventName {
     static let proposalCreated = "proposal.created"
 
     static let memoryTimelineEvent = "memory.timeline.event"
-
-    static let agentNetworkUpdated = "agents.network.updated"
-    static let agentNetworkNodeChange = "agents.network.node.change"
 }
 
 // MARK: - Connection state enum (shared between transport + app layer)

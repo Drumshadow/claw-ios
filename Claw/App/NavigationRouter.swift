@@ -33,10 +33,6 @@ enum ClawTab: String, Hashable, CaseIterable {
 @MainActor
 final class NavigationRouter {
     var selectedTab: ClawTab = .chat
-    var chatPath = NavigationPath()
-    var opsPath = NavigationPath()
-    var dashboardPath = NavigationPath()
-    var morePath = NavigationPath()
 
     // MARK: - Share intake presentation
 
@@ -44,16 +40,6 @@ final class NavigationRouter {
     /// Populated when the app opens via claw://share deep link.
     var pendingShareItems: [ShareIntakeItem] = []
     var showShareIntake: Bool = false
-
-    // MARK: - Voice driving mode (global — accessible from any tab)
-
-    var showGlobalVoiceDriving: Bool = false
-
-    // MARK: - Navigation helpers
-
-    func switchTo(_ tab: ClawTab) {
-        selectedTab = tab
-    }
 
     /// Present pending share items from the App Group queue.
     func presentPendingShares() {

@@ -22,7 +22,6 @@ struct ClawApp: App {
                     .environment(discovery)
                     .environment(gatewayStore)
                     .environment(pushManager)
-                    .environment(router)
                     .preferredColorScheme(.dark)
                     .onOpenURL { url in
                         handleDeepLink(url: url)
