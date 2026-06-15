@@ -12,7 +12,6 @@ struct SettingsView: View {
     @Environment(MemoryTimelineStore.self) private var timelineStore: MemoryTimelineStore?
     @Environment(TerminalSessionStore.self) private var terminalSessionStore: TerminalSessionStore?
     @Environment(RunbookStore.self) private var runbookStore: RunbookStore?
-    @Environment(HomeOrchestrationStore.self) private var homeStore: HomeOrchestrationStore?
     @Environment(ToolApprovalStore.self) private var approvalStore: ToolApprovalStore?
     @Environment(\.dismiss) private var dismiss
 
@@ -425,7 +424,6 @@ struct SettingsView: View {
         timelineStore?.loadAppReviewSampleData()
         terminalSessionStore?.loadAppReviewSampleData()
         runbookStore?.loadAppReviewSampleData()
-        homeStore?.loadAppReviewSampleData()
         approvalStore?.loadAppReviewSampleData()
         withAnimation { sampleModeLoaded = true }
     }
@@ -438,7 +436,6 @@ struct SettingsView: View {
             await timelineStore?.reload()
             try? await terminalSessionStore?.load()
             try? await runbookStore?.load()
-            await homeStore?.loadAll()
         }
     }
 

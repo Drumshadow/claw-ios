@@ -23,7 +23,6 @@ struct ConnectedView: View {
     @State private var agentMonitorStore: AgentMonitorStore?
     @State private var bgAgentStore: BackgroundAgentStore?
     @State private var timelineStore: MemoryTimelineStore?
-    @State private var homeStore: HomeOrchestrationStore?
 
     var body: some View {
         Group {
@@ -34,7 +33,6 @@ struct ConnectedView: View {
                let agentMon = agentMonitorStore,
                let bgAgent = bgAgentStore,
                let timeline = timelineStore,
-               let home = homeStore,
                let modelRouter = modelRouterStore,
                let approvalStore = toolApprovalStore,
                let memStore = memoryStore,
@@ -44,7 +42,7 @@ struct ConnectedView: View {
                 content(sessions: sessions, nodes: nodes, skills: skills, client: client,
                         approvalStore: approvalStore, memStore: memStore, cStore: cStore,
                         terminalStore: terminalStore, runbookStore: runbookStore,
-                        agentMon: agentMon, bgAgent: bgAgent, timeline: timeline, home: home, modelRouter: modelRouter)
+                        agentMon: agentMon, bgAgent: bgAgent, timeline: timeline, modelRouter: modelRouter)
             } else {
                 ZStack {
                     Color.clawBg.ignoresSafeArea()
@@ -88,7 +86,6 @@ struct ConnectedView: View {
         agentMon: AgentMonitorStore,
         bgAgent: BackgroundAgentStore,
         timeline: MemoryTimelineStore,
-        home: HomeOrchestrationStore,
         modelRouter: ModelRouterStore
     ) -> some View {
         AdaptiveSessionsLayout(client: client)
@@ -104,7 +101,6 @@ struct ConnectedView: View {
             .environment(agentMon)
             .environment(bgAgent)
             .environment(timeline)
-            .environment(home)
     }
 
     // MARK: - Setup
@@ -174,11 +170,6 @@ struct ConnectedView: View {
             timelineStore = store
             Task { try? await store.reload() }
         }
-        if homeStore == nil {
-            let store = HomeOrchestrationStore(client: client)
-            homeStore = store
-            Task { await store.loadAll() }
-        }
     }
 
     private func resetStores(for client: GatewayClient, clientID: ObjectIdentifier) {
@@ -229,10 +220,6 @@ struct ConnectedView: View {
         let timeline = MemoryTimelineStore(client: client)
         timelineStore = timeline
         Task { try? await timeline.reload() }
-
-        let home = HomeOrchestrationStore(client: client)
-        homeStore = home
-        Task { await home.loadAll() }
     }
 
     private func refreshDynamicStores() {
@@ -248,7 +235,6 @@ struct ConnectedView: View {
             if let agentMonitorStore { await agentMonitorStore.refresh() }
             if let bgAgentStore { await bgAgentStore.loadAll() }
             if let timelineStore { try? await timelineStore.reload() }
-            if let homeStore { await homeStore.loadAll() }
         }
     }
 }
@@ -271,7 +257,6 @@ struct AdaptiveSessionsLayout: View {
     @Environment(AgentMonitorStore.self) private var agentMonitorStore
     @Environment(BackgroundAgentStore.self) private var bgAgentStore
     @Environment(MemoryTimelineStore.self) private var timelineStore
-    @Environment(HomeOrchestrationStore.self) private var homeStore
     @State private var selectedSession: ClawSession?
     @SceneStorage("claw.selectedSessionID") private var selectedSessionID: String?
     @State private var showSettings = false
@@ -426,7 +411,6 @@ struct AdaptiveSessionsLayout: View {
                     .environment(agentMonitorStore)
                     .environment(bgAgentStore)
                     .environment(timelineStore)
-                    .environment(homeStore)
             }
             .tabItem { Label(ClawTab.dashboard.title, systemImage: ClawTab.dashboard.systemImage) }
             .tag(ClawTab.dashboard)
@@ -443,7 +427,6 @@ struct AdaptiveSessionsLayout: View {
                     .environment(agentMonitorStore)
                     .environment(bgAgentStore)
                     .environment(timelineStore)
-                    .environment(homeStore)
             }
             .tabItem { Label(ClawTab.more.title, systemImage: ClawTab.more.systemImage) }
             .tag(ClawTab.more)

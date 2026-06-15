@@ -112,18 +112,6 @@ enum GatewayMethod {
 
     static let agentNetworkState = "agents.network.state"
     static let agentNetworkSubscribe = "agents.network.subscribe"
-
-    static let homeIntegrationsList = "home.integrations.list"
-    static let homeIntegrationCreate = "home.integration.create"
-    static let homeIntegrationToggle = "home.integration.toggle"
-    static let homeIntegrationSync = "home.integration.sync"
-    static let homeReminders = "home.reminders"
-    static let homeGroceriesList = "home.groceries.list"
-    static let homeGroceriesCreate = "home.groceries.create"
-    static let homeGroceriesUpdate = "home.groceries.update"
-    static let homeTasksList = "home.tasks.list"
-    static let homeTasksCreate = "home.tasks.create"
-    static let homeTasksUpdate = "home.tasks.update"
 }
 
 // MARK: - Agent IDs offered when creating sessions
@@ -198,10 +186,6 @@ enum GatewayEventName {
 
     static let agentNetworkUpdated = "agents.network.updated"
     static let agentNetworkNodeChange = "agents.network.node.change"
-
-    static let homeIntegrationStatusChange = "home.integration.status"
-    static let homeTaskCreated = "home.task.created"
-    static let homeTaskUpdated = "home.task.updated"
 }
 
 // MARK: - Connection state enum (shared between transport + app layer)
