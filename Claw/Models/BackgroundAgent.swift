@@ -7,7 +7,6 @@ import Foundation
 //
 // Gateway contract:
 //   - List:   GatewayMethod.backgroundAgentsList    → { watchers: [BackgroundWatcher] }
-//   - Create: GatewayMethod.backgroundAgentCreate   → BackgroundWatcher
 //   - Delete: GatewayMethod.backgroundAgentDelete   → { id: String }
 //   - Toggle: GatewayMethod.backgroundAgentToggle   → { id: String, enabled: Bool }
 //   Events:   GatewayEventName.backgroundAgentAlert → { watcherId, incidentId, result }

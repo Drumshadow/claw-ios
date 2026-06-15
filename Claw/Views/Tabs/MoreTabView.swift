@@ -9,7 +9,6 @@ struct MoreTabView: View {
     @Environment(NodeStore.self) private var nodeStore
     @Environment(BackgroundAgentStore.self) private var bgAgentStore
     @Environment(MemoryTimelineStore.self) private var timelineStore
-    @Environment(HomeOrchestrationStore.self) private var homeStore
     @Environment(SessionStore.self) private var sessionStore
     @Environment(AgentMonitorStore.self) private var agentMonitorStore
     @State private var showSettings = false
@@ -98,36 +97,6 @@ struct MoreTabView: View {
                 Text("Automation")
             } footer: {
                 Text("Things OpenClaw can keep doing after you leave the chat.")
-            }
-            .listRowBackground(Color.clawCard)
-
-            Section {
-                NavigationLink {
-                    HomeOrchestrationView()
-                        .environment(homeStore)
-                        .environment(sessionStore)
-                } label: {
-                    destinationRow(
-                        title: "Home AI",
-                        subtitle: "Personal tasks and household orchestration",
-                        systemImage: "house.fill",
-                        badge: homeStore.unreadTaskCount == 0 ? nil : "\(homeStore.unreadTaskCount)"
-                    )
-                }
-
-                NavigationLink {
-                    IntegrationRegistryView()
-                        .environment(homeStore)
-                } label: {
-                    destinationRow(
-                        title: "Integrations",
-                        subtitle: "Connected services and available providers",
-                        systemImage: "plug",
-                        badge: "\(homeStore.connectedCount) connected"
-                    )
-                }
-            } header: {
-                Text("Personal")
             }
             .listRowBackground(Color.clawCard)
 

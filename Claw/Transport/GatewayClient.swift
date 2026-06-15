@@ -253,7 +253,15 @@ actor GatewayClient {
         let gatewayID = config.id.uuidString
         let storedToken = await identity.loadDeviceToken(forGatewayID: gatewayID) ?? ""
 
-        let scopes = ["operator.read", "operator.write"]
+        // operator.approvals lets the gateway deliver exec.approval.requested events and
+        // authorize exec.approval.resolve (the tool-approval flow). It is requested ONLY when
+        // the user opts in (Settings → Tool Approvals): the gateway treats it as a scope
+        // upgrade requiring a one-time device re-approval, so devices that never use approvals
+        // are never bounced to the pairing screen.
+        var scopes = ["operator.read", "operator.write"]
+        if ToolApprovalSettings.isEnabled {
+            scopes.append("operator.approvals")
+        }
         let signature = try await identity.signV3(
             deviceID: deviceID,
             clientID: "openclaw-ios",
@@ -342,9 +350,10 @@ actor GatewayClient {
     ) async throws -> HandshakeResult {
         guard response.ok else {
             if let err = response.error {
-                // Gateway signals unapproved device as an error — treat it as pending approval
-                let msg = err.message.lowercased()
-                if msg.contains("pairing required") || msg.contains("not approved") || msg.contains("pending approval") {
+                // An unapproved device is reported via the structured PAIRING_REQUIRED reason
+                // (code/details/message). Treat only that as "keep polling for approval"; any
+                // other error is a genuine handshake failure we must surface immediately.
+                if err.indicatesPairingRequired {
                     return .pendingApproval(deviceID: deviceID)
                 }
                 throw GatewayClientError.serverError(err)
@@ -433,7 +442,7 @@ actor GatewayClient {
                 }
                 await router.resolve(id: id, payload: payload)
             } else {
-                let error = response.error ?? GatewayError(code: "unknown", message: "Unknown error")
+                let error = response.error ?? GatewayError(code: "unknown", message: "Unknown error", details: nil)
                 await router.reject(id: id, error: GatewayClientError.serverError(error))
             }
 
@@ -480,7 +489,7 @@ actor GatewayClient {
     }
 
     private func sendPing() async {
-        let pingFrame: [String: String] = ["type": "req", "id": UUID().uuidString, "method": "ping"]
+        let pingFrame: [String: String] = ["type": "req", "id": UUID().uuidString, "method": GatewayMethod.ping]
         guard let data = try? encoder.encode(pingFrame),
               let str = String(data: data, encoding: .utf8),
               let task = webSocketTask else { return }

@@ -20,6 +20,9 @@ struct ShareIntakeView: View {
     let item: ShareIntakeItem
     /// Available sessions for routing selection.
     var sessions: [ClawSession] = []
+    /// Delivers the finalized item to the gateway; returns whether it was sent. When nil or it
+    /// returns false, the item stays safely queued for delivery on the next gateway connect.
+    var onSend: ((ShareIntakeItem) async -> Bool)? = nil
     var onDelivered: ((ShareIntakeItem) -> Void)? = nil
     var onDismiss: () -> Void
 
@@ -38,11 +41,13 @@ struct ShareIntakeView: View {
     init(
         item: ShareIntakeItem,
         sessions: [ClawSession] = [],
+        onSend: ((ShareIntakeItem) async -> Bool)? = nil,
         onDelivered: ((ShareIntakeItem) -> Void)? = nil,
         onDismiss: @escaping () -> Void
     ) {
         self.item = item
         self.sessions = sessions
+        self.onSend = onSend
         self.onDelivered = onDelivered
         self.onDismiss = onDismiss
         // Pre-select the first recommended action
@@ -346,7 +351,10 @@ struct ShareIntakeView: View {
         isSending = true
         errorMessage = nil
 
-        // Build the final item with selected action + routing
+        // Build the finalized item with the chosen action + routing. It supersedes the
+        // original queued item (created by the share extension with default action/routing),
+        // so remove that and enqueue this one — otherwise the same share could be delivered
+        // twice with different prompts.
         var finalItem = ShareIntakeItem(
             contentType: item.contentType,
             action: selectedAction,
@@ -359,18 +367,23 @@ struct ShareIntakeView: View {
         )
         finalItem.extractedMetadata = item.extractedMetadata
 
+        ShareIntakeQueue.shared.remove(id: item.id)
         ShareIntakeQueue.shared.enqueue(finalItem)
 
-        // Signal success
-        withAnimation {
-            didDeliver = true
+        Task { @MainActor in
+            let delivered = await onSend?(finalItem) ?? false
             isSending = false
-        }
-        onDelivered?(finalItem)
-        // Small delay so user sees the confirmation before dismiss
-        Task {
-            try? await Task.sleep(nanoseconds: 600_000_000)
-            onDismiss()
+            if delivered {
+                withAnimation { didDeliver = true }
+            } else {
+                // Not sent right now (offline, or a transient send error). It stays queued and
+                // is delivered automatically the next time the app connects.
+                errorMessage = "Saved to your share queue — it'll be sent when you're connected."
+            }
+            // Brief pause so the user sees the result, then advance / close. Closing is driven
+            // by onDelivered (not onDismiss), so the queued item is kept for the drain.
+            try? await Task.sleep(nanoseconds: delivered ? 600_000_000 : 1_400_000_000)
+            onDelivered?(finalItem)
         }
     }
 }

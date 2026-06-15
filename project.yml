@@ -44,8 +44,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: ai.clawos.app
         SWIFT_VERSION: 5.9
         DEVELOPMENT_TEAM: UD4F4U8M59
-        MARKETING_VERSION: 1.0.1
-        CURRENT_PROJECT_VERSION: 2
+        MARKETING_VERSION: 1.0.2
+        CURRENT_PROJECT_VERSION: 3
         SKIP_INSTALL: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES
@@ -73,12 +73,13 @@ targets:
       properties:
         CFBundleDisplayName: Claw
         GITHUB_CLIENT_ID: "$(GITHUB_CLIENT_ID)"
-        CFBundleShortVersionString: "1.0.1"
-        CFBundleVersion: "2"
+        CFBundleShortVersionString: "1.0.2"
+        CFBundleVersion: "3"
         NSBonjourServices:
           - _openclaw._tcp.
         NSCalendarsFullAccessUsageDescription: "Claw can share your calendar with the agent to answer scheduling questions."
         NSContactsUsageDescription: "Claw can share your contacts with the agent to help you communicate."
+        NSFaceIDUsageDescription: "Claw uses Face ID to confirm high-risk agent actions, like approving a production command, before they run."
         NSLocalNetworkUsageDescription: "Claw needs local network access to discover AI agent gateways on your network."
         NSCameraUsageDescription: "Claw uses the camera to scan QR codes for quick gateway setup."
         # No ATS exceptions: all gateway traffic uses WSS, and all external API
@@ -132,8 +133,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: ai.clawos.app.share
         SWIFT_VERSION: 5.9
         DEVELOPMENT_TEAM: UD4F4U8M59
-        MARKETING_VERSION: 1.0.1
-        CURRENT_PROJECT_VERSION: 2
+        MARKETING_VERSION: 1.0.2
+        CURRENT_PROJECT_VERSION: 3
         SKIP_INSTALL: YES
     entitlements:
       path: ClawShareExtension/ClawShareExtension.entitlements
@@ -144,8 +145,8 @@ targets:
       path: ClawShareExtension/Info.plist
       properties:
         CFBundleDisplayName: Send to Claw
-        CFBundleShortVersionString: "1.0.1"
-        CFBundleVersion: "2"
+        CFBundleShortVersionString: "1.0.2"
+        CFBundleVersion: "3"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.share-services
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
@@ -165,8 +166,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: ai.clawos.app.widgets
         SWIFT_VERSION: 5.9
         DEVELOPMENT_TEAM: UD4F4U8M59
-        MARKETING_VERSION: 1.0.1
-        CURRENT_PROJECT_VERSION: 2
+        MARKETING_VERSION: 1.0.2
+        CURRENT_PROJECT_VERSION: 3
         SKIP_INSTALL: YES
     dependencies:
       - package: ClawShared
@@ -175,8 +176,8 @@ targets:
       path: ClawWidgets/Info.plist
       properties:
         CFBundleDisplayName: Claw
-        CFBundleShortVersionString: "1.0.1"
-        CFBundleVersion: "2"
+        CFBundleShortVersionString: "1.0.2"
+        CFBundleVersion: "3"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
 
@@ -190,8 +191,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: ai.clawos.app.watchkitapp
         SWIFT_VERSION: 5.9
         DEVELOPMENT_TEAM: UD4F4U8M59
-        MARKETING_VERSION: 1.0.1
-        CURRENT_PROJECT_VERSION: 2
+        MARKETING_VERSION: 1.0.2
+        CURRENT_PROJECT_VERSION: 3
         SKIP_INSTALL: YES
     dependencies:
       - package: ClawShared
@@ -202,8 +203,8 @@ targets:
       path: ClawWatch/Info.plist
       properties:
         CFBundleDisplayName: Claw
-        CFBundleShortVersionString: "1.0.1"
-        CFBundleVersion: "2"
+        CFBundleShortVersionString: "1.0.2"
+        CFBundleVersion: "3"
         WKCompanionAppBundleIdentifier: ai.clawos.app
         # Background modes for Watch: allows receiving WCSession transfers
         # while the Watch app is not in the foreground.

@@ -12,7 +12,12 @@ private final class TOFUHostKeyValidator: NIOSSHClientServerAuthenticationDelega
 
     init(host: String, port: Int) {
         let normalizedHost = host.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        self.keychainKey = "ssh_host_key_fingerprint_\(normalizedHost)_\(port)"
+        // v2 pins store the canonical OpenSSH SHA256 fingerprint (see `fingerprint(for:)`).
+        // Pre-v2 pins hashed an unstable debug string and are not comparable, so we drop any
+        // stale v1 pin here and let TOFU re-establish trust on the next connect rather than
+        // raise a false host-key-mismatch after upgrade.
+        self.keychainKey = "ssh_host_key_fp_v2_\(normalizedHost)_\(port)"
+        try? KeychainStore.delete(key: "ssh_host_key_fingerprint_\(normalizedHost)_\(port)")
     }
 
     func validateHostKey(hostKey: NIOSSHPublicKey, validationCompletePromise: EventLoopPromise<Void>) {
@@ -36,12 +41,30 @@ private final class TOFUHostKeyValidator: NIOSSHClientServerAuthenticationDelega
     }
 
     private static func fingerprint(for hostKey: NIOSSHPublicKey) -> String {
-        // NIOSSH exposes parsing and equality publicly but not a stable public encoder
-        // for the wire-format key bytes. Hash the reflected key representation as a
-        // compile-safe TOFU pin; replace with raw wire bytes if/when Citadel/NIOSSH
-        // exposes a public encoder in the app's pinned dependency version.
-        let digest = SHA256.hash(data: Data(String(reflecting: hostKey).utf8))
-        return Data(digest).base64EncodedString()
+        // Canonical OpenSSH SHA256 fingerprint: base64( SHA256( host-key wire blob ) ),
+        // the same value `ssh-keygen -lf` prints. `String(openSSHPublicKey:)` renders the
+        // key as "<algo> <base64 blob> [comment]"; the middle field is the exact SSH wire
+        // encoding of the public key, so hashing its decoded bytes gives a pin that is
+        // stable across app launches, NIOSSH versions, and devices. (The old pin hashed
+        // `String(reflecting:)`, an implementation-detail debug string that could drift
+        // between dependency versions and silently invalidate every saved pin.)
+        let openSSH = String(openSSHPublicKey: hostKey)
+        let fields = openSSH.split(separator: " ", omittingEmptySubsequences: true)
+        if fields.count >= 2, let blob = Data(base64Encoded: String(fields[1])) {
+            return sha256Fingerprint(of: blob)
+        }
+        // Deterministic fallback if the OpenSSH rendering can't be parsed: hash the raw
+        // wire serialization directly. Still bound to real key material, just not in the
+        // ssh-keygen-comparable format.
+        var buffer = ByteBuffer()
+        _ = hostKey.write(to: &buffer)
+        return sha256Fingerprint(of: Data(buffer.readableBytesView))
+    }
+
+    private static func sha256Fingerprint(of data: Data) -> String {
+        let digest = SHA256.hash(data: data)
+        let base64 = Data(digest).base64EncodedString().replacingOccurrences(of: "=", with: "")
+        return "SHA256:" + base64
     }
 }
 

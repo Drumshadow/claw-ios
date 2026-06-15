@@ -45,6 +45,10 @@ final class VoiceSessionBridge {
     // Tracks in-flight send
     nonisolated(unsafe) private var sendTask: Task<Void, Never>?
 
+    /// Cumulative assistant text for the in-flight voice response. `chat` deltas carry the
+    /// full message-so-far (not incremental chunks), so this is replaced, not appended.
+    private var accumulatedResponse = ""
+
     // MARK: - Init
 
     init(client: GatewayClient, sessionKey: String) {
@@ -120,6 +124,14 @@ final class VoiceSessionBridge {
 
     private func performSend(intent: VoiceCommandIntent) async {
         setStatus("Sending…")
+
+        // Subscribe to the response BEFORE sending. If we only subscribed after the send ack,
+        // a fast reply could stream in during the round-trip and be missed (the gateway has no
+        // event replay), leaving us to speak the canned fallback. chat deltas are cumulative,
+        // so any event that lands before the send merely seeds the text — never a problem.
+        let responseTask = Task { await waitForResponse() }
+        await Task.yield()   // let the event-stream continuation register before we send
+
         do {
             let params = VoiceChatSendParams(
                 sessionKey: sessionKey,
@@ -128,57 +140,107 @@ final class VoiceSessionBridge {
             )
             _ = try await client.send(method: GatewayMethod.chatSend, params: params)
             setStatus("Waiting for agent…")
-
-            let response = await waitForResponse()
-            guard !Task.isCancelled else { return }
-
-            lastResponseText = response
-            setStatus("Done")
-            onResponse?(response)
-
         } catch {
+            responseTask.cancel()
             guard !Task.isCancelled else { return }
             let reason = "Send failed: \(error.localizedDescription)"
             setStatus(reason)
             onError?(reason)
+            return
         }
+
+        // Propagate cancellation (user "stop") to the in-flight collector.
+        let response = await withTaskCancellationHandler {
+            await responseTask.value
+        } onCancel: {
+            responseTask.cancel()
+        }
+        guard !Task.isCancelled else { return }
+
+        lastResponseText = response
+        setStatus("Done")
+        onResponse?(response)
     }
 
-    /// Listens to the gateway event stream to collect the assistant's response.
-    /// Returns when message.complete fires or after a 60-second timeout.
+    /// Collects the assistant's spoken response from the gateway's streaming `chat` events
+    /// (the same contract MessageStore consumes), bounded by an overall timeout. Returns the
+    /// final message, or the latest partial if it times out / aborts.
     private func waitForResponse() async -> String {
-        var accumulated = ""
-        var gotComplete = false
-
-        let eventStream = await client.events()
-
-        let timeoutTask = Task {
-            try? await Task.sleep(nanoseconds: 60_000_000_000)
+        accumulatedResponse = ""
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { [weak self] in await self?.collectResponse() }
+            group.addTask { try? await Task.sleep(nanoseconds: 60_000_000_000) }
+            // Whichever finishes first — the response completing, or the timeout — ends the
+            // wait; cancelling the other unblocks it (AsyncStream iteration and Task.sleep
+            // both honor cancellation, so neither can hang the bridge).
+            await group.next()
+            group.cancelAll()
         }
+        return summarizeForSpeech(accumulatedResponse)
+    }
 
+    /// Reads streaming `chat` events for this bridge's session and accumulates the assistant
+    /// text. Each delta carries the cumulative message, so it REPLACES the running text
+    /// (matching MessageStore.handleChatEvent). Returns on final / aborted / error.
+    private func collectResponse() async {
+        let eventStream = await client.events()
         for await event in eventStream {
-            if Task.isCancelled || timeoutTask.isCancelled { break }
+            guard event.name == "chat",
+                  payloadBelongsToSession(event.payload),
+                  let state = event.payload["state"]?.stringValue else { continue }
 
-            switch event.name {
-            case GatewayEventName.messageDelta:
-                if let delta = event.payload["delta"]?.stringValue {
-                    accumulated += delta
+            switch state {
+            case "delta":
+                if let msg = event.payload["message"], let text = Self.extractText(from: msg), !text.isEmpty {
+                    accumulatedResponse = text
                     setStatus("Receiving…")
                 }
-            case GatewayEventName.messageComplete:
-                if let content = event.payload["content"]?.stringValue, !content.isEmpty {
-                    accumulated = content
+            case "final":
+                if let msg = event.payload["message"], let text = Self.extractText(from: msg), !text.isEmpty {
+                    accumulatedResponse = text
                 }
-                gotComplete = true
+                return
+            case "aborted", "error":
+                return
             default:
                 break
             }
-
-            if gotComplete { break }
         }
+    }
 
-        timeoutTask.cancel()
-        return summarizeForSpeech(accumulated)
+    /// True when a `chat` event payload belongs to this bridge's session.
+    private func payloadBelongsToSession(_ payload: [String: JSONValue]) -> Bool {
+        if let sk = payload["sessionKey"]?.stringValue { return sk == sessionKey }
+        if let key = payload["key"]?.stringValue { return key == sessionKey }
+        return false
+    }
+
+    /// Mirror of MessageStore.extractText: pull assistant text from a chat message value.
+    private static func extractText(from value: JSONValue) -> String? {
+        if case .object(let obj) = value { return extractText(from: obj) }
+        if case .string(let s) = value { return s.isEmpty ? nil : s }
+        return nil
+    }
+
+    private static func extractText(from obj: [String: JSONValue]) -> String? {
+        if let t = obj["text"]?.stringValue, !t.isEmpty { return t }
+        if let content = obj["content"] {
+            switch content {
+            case .string(let s) where !s.isEmpty:
+                return s
+            case .array(let blocks):
+                let parts = blocks.compactMap { block -> String? in
+                    guard case .object(let blk) = block,
+                          blk["type"]?.stringValue == "text",
+                          let t = blk["text"]?.stringValue, !t.isEmpty else { return nil }
+                    return t
+                }
+                return parts.isEmpty ? nil : parts.joined(separator: "\n")
+            default:
+                break
+            }
+        }
+        return nil
     }
 
     // MARK: - TTS summary helper

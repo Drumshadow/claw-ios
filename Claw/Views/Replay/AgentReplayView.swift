@@ -11,8 +11,7 @@ import SwiftUI
 //   - Jump-to controls (next user, next tool)
 //
 // Launched from ChatThreadView via the "Replay" toolbar button.
-// The session's messages are passed in; live gateway replay data
-// is fetched in background via GatewayMethod.sessionReplayData.
+// The session's messages are passed in and replayed locally.
 
 struct AgentReplayView: View {
     let sessionTitle: String
