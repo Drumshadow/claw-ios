@@ -21,7 +21,7 @@
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.1</string>
+	<string>1.0.2</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -34,7 +34,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>2</string>
+	<string>3</string>
 	<key>GITHUB_CLIENT_ID</key>
 	<string>$(GITHUB_CLIENT_ID)</string>
 	<key>NSAppTransportSecurity</key>
@@ -52,6 +52,8 @@
 	<string>Claw uses the camera to scan QR codes for quick gateway setup.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>Claw can share your contacts with the agent to help you communicate.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Claw uses Face ID to confirm high-risk agent actions, like approving a production command, before they run.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Claw needs local network access to discover AI agent gateways on your network.</string>
 	<key>NSMicrophoneUsageDescription</key>

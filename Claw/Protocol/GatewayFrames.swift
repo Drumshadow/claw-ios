@@ -92,8 +92,53 @@ struct HelloPolicyPayload: Decodable {
 struct GatewayError: Decodable, LocalizedError {
     let code: String
     let message: String
+    let details: GatewayErrorDetails?
+
+    init(code: String, message: String, details: GatewayErrorDetails?) {
+        self.code = code
+        self.message = message
+        self.details = details
+    }
+
+    enum CodingKeys: String, CodingKey { case code, message, details }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.code = try container.decode(String.self, forKey: .code)
+        self.message = try container.decode(String.self, forKey: .message)
+        // Lenient by design: a present-but-wrong-typed `details` (string/number/array from
+        // a buggy or hostile gateway) degrades to nil instead of throwing typeMismatch, which
+        // would otherwise abort decoding the whole error — and with it the connect handshake,
+        // masking the pairing signal. Absent/null/object-with-missing-fields all yield nil too.
+        self.details = (try? container.decodeIfPresent(GatewayErrorDetails.self, forKey: .details)) ?? nil
+    }
 
     var errorDescription: String? { "\(code): \(message)" }
+
+    /// True when the gateway is rejecting the connect handshake because this device has
+    /// not yet been approved by an operator (`openclaw devices approve <id>`).
+    ///
+    /// The gateway carries this as the structured `PAIRING_REQUIRED` reason — exposed as
+    /// the top-level `code` and/or a nested `details.code` — and always includes the phrase
+    /// "pairing required" in the human message (the OpenClaw first-party client matches the
+    /// same phrase). We accept any of the three so a wording change on either side can't
+    /// silently turn "waiting for approval" into a hard failure, or vice versa.
+    var indicatesPairingRequired: Bool {
+        let pairingCode = "PAIRING_REQUIRED"
+        if code.caseInsensitiveCompare(pairingCode) == .orderedSame { return true }
+        if let detailCode = details?.code, detailCode.caseInsensitiveCompare(pairingCode) == .orderedSame { return true }
+        let lower = message.lowercased()
+        return lower.contains("pairing required")
+            || lower.contains("not approved")
+            || lower.contains("pending approval")
+    }
+}
+
+/// Optional structured detail object attached to a `GatewayError` (e.g. the connect
+/// handshake's `PAIRING_REQUIRED` reason). Decodes leniently: any field may be absent.
+struct GatewayErrorDetails: Decodable {
+    let code: String?
+    let reason: String?
 }
 
 // MARK: - Connect request params
